@@ -10,12 +10,13 @@ A local daemon that monitors GitHub PRs and automatically generates code reviews
 - Clones repos locally and checks out PR branches
 - Generates reviews using Claude Code CLI
 - Appends reviews to a single file per PR (maintains context across updates)
+- **Web interface** for browsing and reading reviews with rendered markdown
 - Desktop notifications (macOS) when new PRs are detected
 - Automatic cleanup of closed PRs and old repos
 
 ## Prerequisites
 
-- Node.js
+- [Bun](https://bun.sh)
 - GitHub CLI (`gh`) authenticated
 - Claude Code CLI (`claude`)
 
@@ -26,7 +27,7 @@ A local daemon that monitors GitHub PRs and automatically generates code reviews
 cd pr-review-daemon
 
 # Install dependencies
-npm install
+bun install
 
 # Configure
 cp .env.example .env
@@ -56,6 +57,9 @@ REPOS=/mycompany\/.*/
 # Work directory (defaults to daemon directory)
 # WORK_DIR=~/pr-reviews
 
+# Web server port for browsing reviews
+WEB_PORT=3456
+
 # Cleanup
 CLEANUP_INTERVAL_HOURS=24
 CLEANUP_AGE_DAYS=7
@@ -64,12 +68,24 @@ CLEANUP_AGE_DAYS=7
 ## Usage
 
 ```bash
-npm start
+bun start
 ```
+
+Then open http://localhost:3456 to browse reviews in your browser.
 
 ## Output
 
-Reviews are saved to: `./<org>_<repo>/pr-review-<number>.md` (in the daemon directory)
+Reviews are saved to: `./reviews/<org>_<repo>/pr-review-<number>.md`
+
+```
+claude-pr-reviewer/
+├── mycompany_repo/           # cloned repo (clean)
+│   └── ... (repo files only)
+├── reviews/
+│   └── mycompany_repo/
+│       ├── pr-review-42.md
+│       └── pr-review-43.md
+```
 
 Each review file accumulates reviews over time as the PR is updated:
 
@@ -95,6 +111,15 @@ Each review file accumulates reviews over time as the PR is updated:
 
 <follow-up review with context from previous>
 ```
+
+## Web Interface
+
+The built-in web server at http://localhost:3456 provides:
+
+- List of all repositories with reviews
+- PR listing with title and author
+- Rendered markdown with syntax highlighting
+- Copy buttons on code blocks
 
 ## State
 
