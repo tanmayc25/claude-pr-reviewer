@@ -746,98 +746,127 @@ const HTML_TEMPLATE = (title: string, content: string): string => `<!DOCTYPE htm
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title} - PR Reviews</title>
   <style>
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       line-height: 1.6;
-      max-width: 900px;
-      margin: 0 auto;
-      padding: 20px;
-      background: #0d1117;
-      color: #c9d1d9;
+      background: #09090b;
+      color: #fafafa;
+      min-height: 100vh;
     }
-    a { color: #58a6ff; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    h1, h2, h3 { color: #f0f6fc; border-bottom: 1px solid #21262d; padding-bottom: 0.3em; }
-    .breadcrumb { margin-bottom: 20px; color: #8b949e; }
-    .breadcrumb a { color: #58a6ff; }
-    .list { list-style: none; padding: 0; }
+    .container { max-width: 900px; margin: 0 auto; padding: 24px; }
+    a { color: #fafafa; text-decoration: none; }
+    a:hover { color: #a1a1aa; }
+    h1 { font-size: 1.875rem; font-weight: 600; color: #fafafa; margin-bottom: 8px; }
+    h2 { font-size: 1.5rem; font-weight: 600; color: #fafafa; margin: 24px 0 16px; }
+    h3 { font-size: 1.25rem; font-weight: 600; color: #fafafa; margin: 20px 0 12px; }
+    .breadcrumb { margin-bottom: 24px; color: #71717a; font-size: 14px; }
+    .breadcrumb a { color: #a1a1aa; }
+    .breadcrumb a:hover { color: #fafafa; }
+    .search-container { margin-bottom: 20px; }
+    .search-input {
+      width: 100%;
+      padding: 10px 14px;
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 8px;
+      color: #fafafa;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .search-input::placeholder { color: #52525b; }
+    .search-input:focus { border-color: #3f3f46; }
+    .list { list-style: none; }
     .list li {
-      padding: 12px 16px;
+      padding: 16px;
       margin: 8px 0;
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 6px;
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 8px;
+      transition: border-color 0.2s, background 0.2s;
     }
-    .list li:hover { border-color: #58a6ff; }
+    .list li:hover { border-color: #3f3f46; background: #1f1f23; }
     .list li a { display: block; }
-    .list .pr-number { font-weight: 600; color: #58a6ff; }
-    .list .pr-title { color: #c9d1d9; margin-left: 8px; }
-    .list .pr-author { color: #8b949e; font-size: 0.85em; margin-top: 4px; }
+    .list .pr-header { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+    .list .pr-number { font-weight: 600; color: #fafafa; }
+    .list .pr-title { color: #a1a1aa; }
+    .list .pr-meta { display: flex; gap: 16px; color: #52525b; font-size: 13px; margin-top: 8px; }
+    .list .pr-author { }
+    .list .pr-synced { }
     .review-content {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      padding: 20px;
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 8px;
+      padding: 24px;
     }
+    .review-content h1, .review-content h2, .review-content h3 { border-bottom: 1px solid #27272a; padding-bottom: 8px; }
+    .review-content p { margin: 12px 0; color: #d4d4d8; }
+    .review-content ul, .review-content ol { margin: 12px 0; padding-left: 24px; color: #d4d4d8; }
+    .review-content li { margin: 4px 0; }
     .review-content pre {
-      background: #0d1117;
+      background: #09090b;
       padding: 16px;
       border-radius: 6px;
       overflow-x: auto;
-      position: relative;
+      margin: 16px 0;
+      border: 1px solid #27272a;
     }
     .review-content code {
-      background: #0d1117;
+      background: #27272a;
       padding: 2px 6px;
       border-radius: 4px;
-      font-family: 'SF Mono', Consolas, monospace;
+      font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+      font-size: 13px;
+      color: #fafafa;
     }
-    .review-content pre code { padding: 0; background: none; }
+    .review-content pre code { padding: 0; background: none; border: none; }
     .review-content blockquote {
-      border-left: 4px solid #30363d;
-      margin: 0;
+      border-left: 3px solid #3f3f46;
+      margin: 16px 0;
       padding-left: 16px;
-      color: #8b949e;
+      color: #71717a;
     }
-    .review-content table {
-      border-collapse: collapse;
-      width: 100%;
-    }
+    .review-content table { border-collapse: collapse; width: 100%; margin: 16px 0; }
     .review-content th, .review-content td {
-      border: 1px solid #30363d;
-      padding: 8px 12px;
+      border: 1px solid #27272a;
+      padding: 10px 14px;
       text-align: left;
     }
-    .review-content th { background: #161b22; }
-    .empty { color: #8b949e; font-style: italic; }
-    hr { border: none; border-top: 1px solid #30363d; margin: 24px 0; }
-    .code-block-wrapper {
-      position: relative;
-    }
+    .review-content th { background: #18181b; font-weight: 600; }
+    .review-content strong { color: #fafafa; }
+    .review-content a { color: #a1a1aa; text-decoration: underline; }
+    .review-content a:hover { color: #fafafa; }
+    .empty { color: #52525b; font-style: italic; padding: 40px; text-align: center; }
+    hr { border: none; border-top: 1px solid #27272a; margin: 24px 0; }
+    .code-block-wrapper { position: relative; }
     .copy-btn {
       position: absolute;
       top: 8px;
       right: 8px;
-      background: #30363d;
-      border: 1px solid #484f58;
+      background: #27272a;
+      border: 1px solid #3f3f46;
       border-radius: 6px;
-      padding: 4px 8px;
+      padding: 6px 10px;
       cursor: pointer;
-      color: #c9d1d9;
+      color: #a1a1aa;
       font-size: 12px;
       opacity: 0;
-      transition: opacity 0.2s;
+      transition: all 0.2s;
     }
     .code-block-wrapper:hover .copy-btn { opacity: 1; }
-    .copy-btn:hover { background: #484f58; }
-    .copy-btn.copied { background: #238636; border-color: #238636; }
+    .copy-btn:hover { background: #3f3f46; color: #fafafa; }
+    .copy-btn.copied { background: #22c55e; border-color: #22c55e; color: #fff; }
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
-  ${content}
+  <div class="container">
+    ${content}
+  </div>
   <script>
     document.addEventListener('DOMContentLoaded', function() {
+      // Copy buttons for code blocks
       document.querySelectorAll('.review-content pre').forEach(function(pre) {
         const wrapper = document.createElement('div');
         wrapper.className = 'code-block-wrapper';
@@ -860,22 +889,46 @@ const HTML_TEMPLATE = (title: string, content: string): string => `<!DOCTYPE htm
         };
         wrapper.appendChild(btn);
       });
+
+      // Search functionality
+      const searchInput = document.getElementById('search-input');
+      if (searchInput) {
+        searchInput.addEventListener('input', function(e) {
+          const query = e.target.value.toLowerCase();
+          document.querySelectorAll('.list li').forEach(function(li) {
+            const text = li.textContent.toLowerCase();
+            li.classList.toggle('hidden', query && !text.includes(query));
+          });
+        });
+      }
     });
   </script>
 </body>
 </html>`;
 
-function extractPRMetadata(filePath: string): { title: string; author: string } {
+function extractPRMetadata(filePath: string): { title: string; author: string; lastSynced: string } {
   try {
     const content = fs.readFileSync(filePath, "utf-8");
     const titleMatch = content.match(/^# PR Review: (.+)$/m);
     const authorMatch = content.match(/^\*\*Author:\*\* (.+)$/m);
+    // Find all review timestamps and get the last one
+    const reviewMatches = content.match(/## Review @ (\d{4}-\d{2}-\d{2}T[\d:.]+Z)/g);
+    let lastSynced = "unknown";
+    if (reviewMatches && reviewMatches.length > 0) {
+      const lastMatch = reviewMatches[reviewMatches.length - 1];
+      const dateStr = lastMatch.match(/(\d{4}-\d{2}-\d{2}T[\d:.]+Z)/)?.[1];
+      if (dateStr) {
+        const date = new Date(dateStr);
+        lastSynced = date.toLocaleString();
+      }
+    }
     return {
       title: titleMatch?.[1] || "Untitled",
       author: authorMatch?.[1] || "unknown",
+      lastSynced,
     };
   } catch {
-    return { title: "Untitled", author: "unknown" };
+    return { title: "Untitled", author: "unknown", lastSynced: "unknown" };
   }
 }
 
@@ -900,14 +953,16 @@ function startWebServer(): void {
         }
 
         const content = repos.length > 0
-          ? `<ul class="list">${repos.map(r =>
+          ? `<div class="search-container">
+              <input type="text" id="search-input" class="search-input" placeholder="Search repositories..." />
+            </div>
+            <ul class="list">${repos.map(r =>
               `<li><a href="/repo/${encodeURIComponent(r)}">${r.replace("_", "/")}</a></li>`
             ).join("")}</ul>`
           : `<p class="empty">No reviews yet. Reviews will appear here once PRs are processed.</p>`;
 
         return new Response(HTML_TEMPLATE("Home", `
           <h1>PR Reviews</h1>
-          <p>Select a repository to view its reviews:</p>
           ${content}
         `), {
           headers: { "Content-Type": "text/html" },
@@ -940,13 +995,16 @@ function startWebServer(): void {
           });
 
         const content = reviews.length > 0
-          ? `<ul class="list">${reviews.map(r => {
+          ? `<div class="search-container">
+              <input type="text" id="search-input" class="search-input" placeholder="Search PRs by title, number, or author..." />
+            </div>
+            <ul class="list">${reviews.map(r => {
               const prNum = r.match(/pr-review-(\d+)\.md/)?.[1] || r;
               const filePath = path.join(repoDir, r);
-              const { title, author } = extractPRMetadata(filePath);
+              const { title, author, lastSynced } = extractPRMetadata(filePath);
               return `<li><a href="/repo/${encodeURIComponent(repoName)}/${encodeURIComponent(r)}">
-                <div><span class="pr-number">PR #${prNum}</span><span class="pr-title">${title}</span></div>
-                <div class="pr-author">by ${author}</div>
+                <div class="pr-header"><span class="pr-number">PR #${prNum}</span><span class="pr-title">${title}</span></div>
+                <div class="pr-meta"><span class="pr-author">by ${author}</span><span class="pr-synced">synced ${lastSynced}</span></div>
               </a></li>`;
             }).join("")}</ul>`
           : `<p class="empty">No reviews yet for this repository.</p>`;
