@@ -4,9 +4,10 @@ import { prState, saveState, isPolling, setPolling } from "./state";
 import { getOpenPRs } from "./github";
 import { cloneOrUpdateRepo, checkoutPRBranch } from "./repo";
 import { runReview } from "./review";
+import { getAuthorLogin, shouldProcessPR } from "./utils";
 import type { PRDetails } from "./types";
 
-async function processPR(pr: PRDetails): Promise<string | null> {
+async function processPR(pr: PRDetails, customPrompt?: string, force?: boolean): Promise<string | null> {
   const prKey = `${pr.repo}#${pr.number}`;
   const lastSha = prState.get(prKey);
   const currentSha = pr.headRefOid;
@@ -17,21 +18,15 @@ async function processPR(pr: PRDetails): Promise<string | null> {
     return null;
   }
 
-  // Skip if already processed this SHA
-  if (lastSha === currentSha) {
+  // Skip if already processed this SHA (unless forced)
+  if (lastSha === currentSha && !force) {
     return null;
   }
 
-  const authorLogin = typeof pr.author === "object" ? pr.author?.login : pr.author;
-  const isOwnPR = CONFIG.githubUsername && authorLogin === CONFIG.githubUsername;
+  const authorLogin = getAuthorLogin(pr.author);
 
   // Filter based on config
-  if (CONFIG.onlyOwnPRs && !isOwnPR) {
-    prState.set(prKey, currentSha);
-    return null;
-  }
-
-  if (!CONFIG.onlyOwnPRs && !CONFIG.reviewOwnPRs && isOwnPR) {
+  if (!shouldProcessPR(authorLogin)) {
     prState.set(prKey, currentSha);
     return null;
   }
@@ -61,7 +56,8 @@ async function processPR(pr: PRDetails): Promise<string | null> {
       pr.repo!,
       pr.number,
       pr.title,
-      currentSha
+      currentSha,
+      customPrompt
     );
 
     // Only update state if review succeeded - allows retry on failure
@@ -89,34 +85,27 @@ export interface PendingPR {
 export async function getPendingPRs(): Promise<PendingPR[]> {
   const prs = await getOpenPRs();
 
-  // Filter PRs based on config
-  const filteredPRs = prs.filter((pr) => {
-    const authorLogin = typeof pr.author === "object" ? pr.author?.login : pr.author;
-    const isOwnPR = CONFIG.githubUsername && authorLogin === CONFIG.githubUsername;
+  // Filter PRs based on config and map to pending format
+  return prs
+    .filter((pr) => shouldProcessPR(getAuthorLogin(pr.author)))
+    .map((pr) => {
+      const prKey = `${pr.repo}#${pr.number}`;
+      const lastSha = prState.get(prKey);
 
-    if (CONFIG.onlyOwnPRs && !isOwnPR) return false;
-    if (!CONFIG.onlyOwnPRs && !CONFIG.reviewOwnPRs && isOwnPR) return false;
-    return true;
-  });
-
-  return filteredPRs.map((pr) => {
-    const prKey = `${pr.repo}#${pr.number}`;
-    const lastSha = prState.get(prKey);
-    const currentSha = pr.headRefOid;
-    const authorLogin = typeof pr.author === "object" ? pr.author?.login : pr.author;
-
-    return {
-      repo: pr.repo!,
-      number: pr.number,
-      title: pr.title,
-      author: authorLogin || "unknown",
-      hasChanges: !lastSha || lastSha !== currentSha,
-    };
-  });
+      return {
+        repo: pr.repo!,
+        number: pr.number,
+        title: pr.title,
+        author: getAuthorLogin(pr.author),
+        hasChanges: !lastSha || lastSha !== pr.headRefOid,
+      };
+    });
 }
 
 export async function syncSelectedPRs(
-  selectedPRs: Array<{ repo: string; number: number }>
+  selectedPRs: Array<{ repo: string; number: number }>,
+  customPrompt?: string,
+  force?: boolean
 ): Promise<{ processed: number; errors: number }> {
   if (isPolling) {
     throw new Error("Sync already in progress");
@@ -144,7 +133,7 @@ export async function syncSelectedPRs(
       }
 
       try {
-        const result = await processPR(pr);
+        const result = await processPR(pr, customPrompt, force);
         if (result) {
           processed++;
         }
@@ -154,7 +143,7 @@ export async function syncSelectedPRs(
       }
     }
 
-    logger.info({ processed, errors }, "Selected PR sync complete");
+    logger.info({ processed, errors, force: !!force }, "Selected PR sync complete");
     return { processed, errors };
   } finally {
     setPolling(false);
@@ -175,20 +164,12 @@ export async function poll(): Promise<void> {
     const prs = await getOpenPRs();
 
     // Filter PRs based on config
-    const filteredPRs = prs.filter((pr) => {
-      const authorLogin = typeof pr.author === "object" ? pr.author?.login : pr.author;
-      const isOwnPR = CONFIG.githubUsername && authorLogin === CONFIG.githubUsername;
-
-      if (CONFIG.onlyOwnPRs && !isOwnPR) return false;
-      if (!CONFIG.onlyOwnPRs && !CONFIG.reviewOwnPRs && isOwnPR) return false;
-      return true;
-    });
+    const filteredPRs = prs.filter((pr) => shouldProcessPR(getAuthorLogin(pr.author)));
 
     logger.info({ monitored: filteredPRs.length, total: prs.length }, "PRs found");
 
     // List filtered PRs
     for (const pr of filteredPRs) {
-      const authorLogin = typeof pr.author === "object" ? pr.author?.login : pr.author;
       const sha = pr.headRefOid ? pr.headRefOid.slice(0, 7) : "?";
       const cached = prState.get(`${pr.repo}#${pr.number}`);
       const status = cached === pr.headRefOid ? "ok" : cached ? "update" : "new";
@@ -197,7 +178,7 @@ export async function poll(): Promise<void> {
           status,
           pr: `${pr.repo}#${pr.number}`,
           sha,
-          author: authorLogin,
+          author: getAuthorLogin(pr.author),
           title: pr.title.slice(0, 50),
         },
         "PR status"

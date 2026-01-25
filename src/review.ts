@@ -10,7 +10,8 @@ export async function runReview(
   repoFullName: string,
   prNumber: number,
   prTitle: string,
-  commitSha: string
+  commitSha: string,
+  customPrompt?: string
 ): Promise<string | null> {
   logger.info({ pr: prNumber, title: prTitle }, "Preparing review");
 
@@ -93,8 +94,10 @@ ${prDetails.body || "(No description provided)"}
 
 ## Changed Files (${changedFiles.length})
 ${changedFiles.map((f) => `- ${f}`).join("\n")}
-${contextSection}
-## Your Task
+${contextSection}${customPrompt ? `## Additional Instructions
+${customPrompt}
+
+` : ""}## Your Task
 1. Read and analyze each changed file in this repository
 2. Review the code changes for:
    - Code quality and best practices

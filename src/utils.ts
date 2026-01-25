@@ -2,6 +2,7 @@ import { execSync, exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
 import { logger } from "./logger";
+import { CONFIG } from "./config";
 
 export const execAsync = promisify(exec);
 
@@ -50,4 +51,20 @@ export function safeJsonParse<T>(str: string | null, fallback: T | null = null):
     logger.warn({ error: (e as Error).message }, "JSON parse failed");
     return fallback;
   }
+}
+
+// Extract author login from PR object (handles both object and string forms)
+export function getAuthorLogin(author: unknown): string {
+  if (typeof author === "object" && author !== null) {
+    return (author as { login?: string }).login || "unknown";
+  }
+  return typeof author === "string" ? author : "unknown";
+}
+
+// Check if PR should be processed based on config filtering rules
+export function shouldProcessPR(authorLogin: string): boolean {
+  const isOwnPR = CONFIG.githubUsername && authorLogin === CONFIG.githubUsername;
+  if (CONFIG.onlyOwnPRs && !isOwnPR) return false;
+  if (!CONFIG.onlyOwnPRs && !CONFIG.reviewOwnPRs && isOwnPR) return false;
+  return true;
 }
