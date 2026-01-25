@@ -1,18 +1,19 @@
-const { execSync } = require("child_process");
-const path = require("path");
-const fs = require("fs");
-const pino = require("pino");
+import { execSync, type ExecSyncOptions } from "child_process";
+import path from "path";
+import fs from "fs";
+import pino from "pino";
+import pinoPretty from "pino-pretty";
+import { marked } from "marked";
 
 // =============================================================================
 // Logger Setup
 // =============================================================================
 
-const pretty = require("pino-pretty");
 const logger = pino(
   {
     level: process.env.LOG_LEVEL || "info",
   },
-  pretty({
+  pinoPretty({
     colorize: true,
     translateTime: "SYS:yyyy-mm-dd HH:MM:ss",
     ignore: "pid,hostname",
@@ -30,13 +31,13 @@ const CONFIG = {
   // Regex: "/pattern/" e.g. "/mycompany\/.*/"
   repoPatterns: process.env.REPOS
     ? process.env.REPOS.split(",").map((s) => s.trim()).filter(Boolean)
-    : [],
+    : [] as string[],
 
   // Poll interval in seconds
   pollInterval: parseInt(process.env.POLL_INTERVAL || "60", 10),
 
   // Directory to clone repos into (defaults to daemon directory)
-  workDir: process.env.WORK_DIR || __dirname,
+  workDir: process.env.WORK_DIR || import.meta.dir,
 
   // Your GitHub username
   githubUsername: process.env.GITHUB_USERNAME || "",
@@ -50,15 +51,43 @@ const CONFIG = {
   // Cleanup settings
   cleanupIntervalHours: parseInt(process.env.CLEANUP_INTERVAL_HOURS || "24", 10),
   cleanupAgeDays: parseInt(process.env.CLEANUP_AGE_DAYS || "7", 10),
+
+  // Web server port for browsing reviews
+  webPort: parseInt(process.env.WEB_PORT || "3456", 10),
 };
+
+// =============================================================================
+// Types
+// =============================================================================
+
+interface PRDetails {
+  number: number;
+  title: string;
+  headRefName?: string;
+  headRefOid?: string;
+  author?: { login: string } | string;
+  updatedAt?: string;
+  body?: string;
+  baseRefName?: string;
+  url?: string;
+  repo?: string;
+  repository?: {
+    nameWithOwner?: string;
+    name?: string;
+  };
+}
+
+interface GhCommandOptions extends ExecSyncOptions {
+  ignoreError?: boolean;
+}
 
 // =============================================================================
 // Repo Pattern Matching
 // =============================================================================
 
-function parseRepoPatterns(patterns) {
-  const exact = [];
-  const regexes = [];
+function parseRepoPatterns(patterns: string[]): { exact: string[]; regexes: RegExp[] } {
+  const exact: string[] = [];
+  const regexes: RegExp[] = [];
 
   for (const pattern of patterns) {
     if (pattern.startsWith("/") && pattern.endsWith("/") && pattern.length > 2) {
@@ -66,7 +95,7 @@ function parseRepoPatterns(patterns) {
         const regexStr = pattern.slice(1, -1);
         regexes.push(new RegExp(regexStr));
       } catch (e) {
-        logger.error({ pattern, error: e.message }, "Invalid regex pattern");
+        logger.error({ pattern, error: (e as Error).message }, "Invalid regex pattern");
       }
     } else {
       exact.push(pattern);
@@ -76,7 +105,7 @@ function parseRepoPatterns(patterns) {
   return { exact, regexes };
 }
 
-function matchesRepoPatterns(repoName, exact, regexes) {
+function matchesRepoPatterns(repoName: string, exact: string[], regexes: RegExp[]): boolean {
   if (exact.length === 0 && regexes.length === 0) {
     return true;
   }
@@ -97,30 +126,30 @@ const { exact: exactRepos, regexes: repoRegexes } = parseRepoPatterns(CONFIG.rep
 // State Management
 // =============================================================================
 
-const prState = new Map();
-const STATE_FILE = path.join(__dirname, ".pr-state.json");
+const prState = new Map<string, string>();
+const STATE_FILE = path.join(import.meta.dir, ".pr-state.json");
 
 // Polling lock to prevent concurrent polls
 let isPolling = false;
 
-function loadState() {
+function loadState(): void {
   try {
     if (fs.existsSync(STATE_FILE)) {
       const data = JSON.parse(fs.readFileSync(STATE_FILE, "utf-8"));
-      Object.entries(data).forEach(([k, v]) => prState.set(k, v));
+      Object.entries(data).forEach(([k, v]) => prState.set(k, v as string));
       logger.info({ count: prState.size }, "Loaded PR state");
     }
   } catch (e) {
-    logger.error({ error: e.message }, "Could not load state");
+    logger.error({ error: (e as Error).message }, "Could not load state");
   }
 }
 
-function saveState() {
+function saveState(): void {
   try {
     const data = Object.fromEntries(prState);
     fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2));
   } catch (e) {
-    logger.error({ error: e.message }, "Could not save state");
+    logger.error({ error: (e as Error).message }, "Could not save state");
   }
 }
 
@@ -128,13 +157,13 @@ function saveState() {
 // Utilities
 // =============================================================================
 
-function ensureDir(dir) {
+function ensureDir(dir: string): void {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
 }
 
-function ghCommand(args, options = {}) {
+function ghCommand(args: string, options: GhCommandOptions = {}): string | null {
   try {
     return execSync(`gh ${args}`, {
       encoding: "utf-8",
@@ -143,22 +172,23 @@ function ghCommand(args, options = {}) {
     }).trim();
   } catch (e) {
     if (!options.ignoreError) {
-      logger.error({ command: `gh ${args}`, error: e.message }, "gh command failed");
+      logger.error({ command: `gh ${args}`, error: (e as Error).message }, "gh command failed");
     }
     return null;
   }
 }
 
-function safeJsonParse(str, fallback = null) {
+function safeJsonParse<T>(str: string | null, fallback: T | null = null): T | null {
+  if (!str) return fallback;
   try {
-    return JSON.parse(str);
+    return JSON.parse(str) as T;
   } catch (e) {
-    logger.warn({ error: e.message }, "JSON parse failed");
+    logger.warn({ error: (e as Error).message }, "JSON parse failed");
     return fallback;
   }
 }
 
-function notify(title, message, subtitle = "") {
+function notify(title: string, message: string, subtitle: string = ""): void {
   // macOS Notification Center
   try {
     const safeMessage = message.replace(/["'\\]/g, " ");
@@ -166,7 +196,7 @@ function notify(title, message, subtitle = "") {
     const safeSubtitle = subtitle.replace(/["'\\]/g, " ");
     const script = `display notification "${safeMessage}" with title "${safeTitle}"${safeSubtitle ? ` subtitle "${safeSubtitle}"` : ""} sound name "Glass"`;
     execSync(`osascript -e '${script}'`, { stdio: "pipe" });
-  } catch (e) {
+  } catch {
     // Ignore notification errors
   }
 
@@ -181,12 +211,12 @@ function notify(title, message, subtitle = "") {
 // Cleanup
 // =============================================================================
 
-function isPROpen(repo, prNumber) {
+function isPROpen(repo: string, prNumber: number): boolean {
   const result = ghCommand(`pr view ${prNumber} --repo ${repo} --json state`, {
     ignoreError: true,
   });
   if (result) {
-    const parsed = safeJsonParse(result);
+    const parsed = safeJsonParse<{ state: string }>(result);
     if (parsed) {
       return parsed.state === "OPEN";
     }
@@ -194,9 +224,9 @@ function isPROpen(repo, prNumber) {
   return false;
 }
 
-function cleanupClosedPRs() {
+function cleanupClosedPRs(): void {
   logger.info("Checking for closed PRs to clean up...");
-  const keysToRemove = [];
+  const keysToRemove: { prKey: string; repo: string }[] = [];
 
   for (const [prKey] of prState.entries()) {
     const match = prKey.match(/^(.+)#(\d+)$/);
@@ -218,7 +248,7 @@ function cleanupClosedPRs() {
         fs.rmSync(repoDir, { recursive: true, force: true });
         logger.info({ dir: repoDir }, "Deleted local clone");
       } catch (e) {
-        logger.error({ dir: repoDir, error: e.message }, "Could not delete repo");
+        logger.error({ dir: repoDir, error: (e as Error).message }, "Could not delete repo");
       }
     }
   }
@@ -231,7 +261,7 @@ function cleanupClosedPRs() {
   }
 }
 
-function cleanupOldRepos() {
+function cleanupOldRepos(): void {
   logger.info({ maxAgeDays: CONFIG.cleanupAgeDays }, "Cleaning up old repos...");
 
   if (!fs.existsSync(CONFIG.workDir)) return;
@@ -269,7 +299,7 @@ function cleanupOldRepos() {
         }
       }
     } catch (e) {
-      logger.error({ dir: dirPath, error: e.message }, "Error checking directory");
+      logger.error({ dir: dirPath, error: (e as Error).message }, "Error checking directory");
     }
   }
 
@@ -280,7 +310,7 @@ function cleanupOldRepos() {
   }
 }
 
-async function runCleanup() {
+async function runCleanup(): Promise<void> {
   logger.info("--- Running cleanup ---");
   cleanupClosedPRs();
   cleanupOldRepos();
@@ -291,8 +321,8 @@ async function runCleanup() {
 // GitHub PR Fetching
 // =============================================================================
 
-async function getOpenPRs() {
-  let prs = [];
+async function getOpenPRs(): Promise<PRDetails[]> {
+  let prs: PRDetails[] = [];
 
   const hasPatterns = exactRepos.length > 0 || repoRegexes.length > 0;
   const hasRegexOnly = exactRepos.length === 0 && repoRegexes.length > 0;
@@ -304,7 +334,7 @@ async function getOpenPRs() {
         `pr list --repo ${repo} --json number,title,headRefName,headRefOid,author,updatedAt --limit 50`
       );
       if (result) {
-        const repoPRs = safeJsonParse(result, []);
+        const repoPRs = safeJsonParse<PRDetails[]>(result, []) || [];
         prs = prs.concat(repoPRs.map((pr) => ({ ...pr, repo })));
       }
     }
@@ -316,11 +346,11 @@ async function getOpenPRs() {
       `search prs --state=open --involves=@me --json repository,number,title,author,updatedAt --limit 100`
     );
     if (result) {
-      const searchResults = safeJsonParse(result, []);
+      const searchResults = safeJsonParse<PRDetails[]>(result, []) || [];
 
       for (const pr of searchResults) {
         const repoName =
-          pr.repository?.nameWithOwner || pr.repository?.name || pr.repository;
+          pr.repository?.nameWithOwner || pr.repository?.name || (pr.repository as unknown as string);
         if (!repoName) continue;
 
         if (!matchesRepoPatterns(repoName, exactRepos, repoRegexes)) {
@@ -337,7 +367,7 @@ async function getOpenPRs() {
           `pr view ${pr.number} --repo ${repoName} --json number,title,headRefName,headRefOid,author,updatedAt`
         );
         if (prDetails) {
-          const fullPR = safeJsonParse(prDetails);
+          const fullPR = safeJsonParse<PRDetails>(prDetails);
           if (fullPR) {
             prs.push({ ...fullPR, repo: repoName });
           }
@@ -353,7 +383,7 @@ async function getOpenPRs() {
 // Repository Management
 // =============================================================================
 
-async function cloneOrUpdateRepo(repoFullName) {
+async function cloneOrUpdateRepo(repoFullName: string): Promise<string> {
   const repoDir = path.join(CONFIG.workDir, repoFullName.replace("/", "_"));
   ensureDir(CONFIG.workDir);
 
@@ -368,7 +398,7 @@ async function cloneOrUpdateRepo(repoFullName) {
   return repoDir;
 }
 
-async function checkoutPRBranch(repoDir, repoFullName, prNumber) {
+async function checkoutPRBranch(repoDir: string, repoFullName: string, prNumber: number): Promise<void> {
   logger.info({ pr: prNumber }, "Checking out PR");
   // Reset any local changes before checkout
   execSync("git checkout -- .", { cwd: repoDir, stdio: "pipe" });
@@ -382,11 +412,17 @@ async function checkoutPRBranch(repoDir, repoFullName, prNumber) {
 // Review Generation
 // =============================================================================
 
-async function runReview(repoDir, repoFullName, prNumber, prTitle, commitSha) {
+async function runReview(
+  repoDir: string,
+  repoFullName: string,
+  prNumber: number,
+  prTitle: string,
+  commitSha: string
+): Promise<string | null> {
   logger.info({ pr: prNumber, title: prTitle }, "Preparing review");
 
   // Get changed files
-  let changedFiles = [];
+  let changedFiles: string[] = [];
   try {
     const filesOutput = ghCommand(
       `pr diff ${prNumber} --repo ${repoFullName} --name-only`
@@ -394,20 +430,20 @@ async function runReview(repoDir, repoFullName, prNumber, prTitle, commitSha) {
     if (filesOutput) {
       changedFiles = filesOutput.split("\n").filter(Boolean);
     }
-  } catch (e) {
+  } catch {
     changedFiles = [];
   }
 
   // Get PR details
-  let prDetails = {};
+  let prDetails: Partial<PRDetails> = {};
   try {
     const detailsOutput = ghCommand(
       `pr view ${prNumber} --repo ${repoFullName} --json body,author,baseRefName,headRefName,url`
     );
     if (detailsOutput) {
-      prDetails = safeJsonParse(detailsOutput, {});
+      prDetails = safeJsonParse<PRDetails>(detailsOutput, {}) || {};
     }
-  } catch (e) {
+  } catch {
     // Ignore
   }
 
@@ -448,11 +484,13 @@ ${existingReviews}
 `;
   }
 
+  const authorLogin = typeof prDetails.author === "object" ? prDetails.author?.login : prDetails.author;
+
   const reviewPrompt = `You are reviewing a Pull Request. Analyze the changes and provide a thorough code review.
 
 ## PR #${prNumber}: ${prTitle}
 **Repository:** ${repoFullName}
-**Author:** ${prDetails.author?.login || "unknown"}
+**Author:** ${authorLogin || "unknown"}
 **Branch:** ${prDetails.headRefName || "unknown"} -> ${prDetails.baseRefName || "main"}
 **URL:** ${prDetails.url || `https://github.com/${repoFullName}/pull/${prNumber}`}
 **Commit:** ${shortSha}
@@ -502,7 +540,7 @@ ${claudeReview}
 
 **Repository:** ${repoFullName}
 **PR:** #${prNumber}
-**Author:** ${prDetails.author?.login || "unknown"}
+**Author:** ${authorLogin || "unknown"}
 **URL:** ${prDetails.url || `https://github.com/${repoFullName}/pull/${prNumber}`}
 **Created:** ${timestamp}
 ${reviewEntry}`;
@@ -515,7 +553,7 @@ ${reviewEntry}`;
     return reviewOutputPath;
   } catch (error) {
     // Truncate error message to avoid bloating the review file
-    const shortError = error.message.slice(0, 500);
+    const shortError = (error as Error).message.slice(0, 500);
     logger.error({ error: shortError }, "Claude review error");
 
     const timestamp = new Date().toISOString();
@@ -534,7 +572,7 @@ The automated review could not be completed. Will retry on next poll.
 
 **Repository:** ${repoFullName}
 **PR:** #${prNumber}
-**Author:** ${prDetails.author?.login || "unknown"}
+**Author:** ${authorLogin || "unknown"}
 **URL:** ${prDetails.url || `https://github.com/${repoFullName}/pull/${prNumber}`}
 ${errorEntry}`;
       fs.writeFileSync(reviewOutputPath, header);
@@ -550,7 +588,7 @@ ${errorEntry}`;
 // PR Processing
 // =============================================================================
 
-async function processPR(pr) {
+async function processPR(pr: PRDetails): Promise<string | null> {
   const prKey = `${pr.repo}#${pr.number}`;
   const lastSha = prState.get(prKey);
   const currentSha = pr.headRefOid;
@@ -566,7 +604,7 @@ async function processPR(pr) {
     return null;
   }
 
-  const authorLogin = pr.author?.login || pr.author;
+  const authorLogin = typeof pr.author === "object" ? pr.author?.login : pr.author;
   const isOwnPR =
     CONFIG.githubUsername && authorLogin === CONFIG.githubUsername;
 
@@ -605,11 +643,11 @@ async function processPR(pr) {
   );
 
   try {
-    const repoDir = await cloneOrUpdateRepo(pr.repo);
-    await checkoutPRBranch(repoDir, pr.repo, pr.number);
+    const repoDir = await cloneOrUpdateRepo(pr.repo!);
+    await checkoutPRBranch(repoDir, pr.repo!, pr.number);
     const reviewPath = await runReview(
       repoDir,
-      pr.repo,
+      pr.repo!,
       pr.number,
       pr.title,
       currentSha
@@ -624,7 +662,7 @@ async function processPR(pr) {
     }
     return reviewPath;
   } catch (error) {
-    logger.error({ pr: prKey, error: error.message.slice(0, 200) }, "Error processing PR");
+    logger.error({ pr: prKey, error: (error as Error).message.slice(0, 200) }, "Error processing PR");
     return null;
   }
 }
@@ -633,7 +671,7 @@ async function processPR(pr) {
 // Polling
 // =============================================================================
 
-async function poll() {
+async function poll(): Promise<void> {
   // Prevent concurrent polls
   if (isPolling) {
     logger.warn("Previous poll still running, skipping this cycle");
@@ -648,7 +686,7 @@ async function poll() {
 
     // Filter PRs based on config
     const filteredPRs = prs.filter((pr) => {
-      const authorLogin = pr.author?.login || pr.author;
+      const authorLogin = typeof pr.author === "object" ? pr.author?.login : pr.author;
       const isOwnPR =
         CONFIG.githubUsername && authorLogin === CONFIG.githubUsername;
 
@@ -661,7 +699,7 @@ async function poll() {
 
     // List filtered PRs
     for (const pr of filteredPRs) {
-      const authorLogin = pr.author?.login || pr.author;
+      const authorLogin = typeof pr.author === "object" ? pr.author?.login : pr.author;
       const sha = pr.headRefOid ? pr.headRefOid.slice(0, 7) : "?";
       const cached = prState.get(`${pr.repo}#${pr.number}`);
       const status =
@@ -691,17 +729,293 @@ async function poll() {
       logger.info({ count: processed }, "Processed PRs");
     }
   } catch (error) {
-    logger.error({ error: error.message }, "Poll error");
+    logger.error({ error: (error as Error).message }, "Poll error");
   } finally {
     isPolling = false;
   }
 }
 
 // =============================================================================
+// Web Server for Browsing Reviews
+// =============================================================================
+
+const HTML_TEMPLATE = (title: string, content: string): string => `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title} - PR Reviews</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      line-height: 1.6;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #0d1117;
+      color: #c9d1d9;
+    }
+    a { color: #58a6ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    h1, h2, h3 { color: #f0f6fc; border-bottom: 1px solid #21262d; padding-bottom: 0.3em; }
+    .breadcrumb { margin-bottom: 20px; color: #8b949e; }
+    .breadcrumb a { color: #58a6ff; }
+    .list { list-style: none; padding: 0; }
+    .list li {
+      padding: 12px 16px;
+      margin: 8px 0;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+    }
+    .list li:hover { border-color: #58a6ff; }
+    .list li a { display: block; }
+    .list .pr-number { font-weight: 600; color: #58a6ff; }
+    .list .pr-title { color: #c9d1d9; margin-left: 8px; }
+    .list .pr-author { color: #8b949e; font-size: 0.85em; margin-top: 4px; }
+    .review-content {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 20px;
+    }
+    .review-content pre {
+      background: #0d1117;
+      padding: 16px;
+      border-radius: 6px;
+      overflow-x: auto;
+      position: relative;
+    }
+    .review-content code {
+      background: #0d1117;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'SF Mono', Consolas, monospace;
+    }
+    .review-content pre code { padding: 0; background: none; }
+    .review-content blockquote {
+      border-left: 4px solid #30363d;
+      margin: 0;
+      padding-left: 16px;
+      color: #8b949e;
+    }
+    .review-content table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    .review-content th, .review-content td {
+      border: 1px solid #30363d;
+      padding: 8px 12px;
+      text-align: left;
+    }
+    .review-content th { background: #161b22; }
+    .empty { color: #8b949e; font-style: italic; }
+    hr { border: none; border-top: 1px solid #30363d; margin: 24px 0; }
+    .code-block-wrapper {
+      position: relative;
+    }
+    .copy-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: #30363d;
+      border: 1px solid #484f58;
+      border-radius: 6px;
+      padding: 4px 8px;
+      cursor: pointer;
+      color: #c9d1d9;
+      font-size: 12px;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .code-block-wrapper:hover .copy-btn { opacity: 1; }
+    .copy-btn:hover { background: #484f58; }
+    .copy-btn.copied { background: #238636; border-color: #238636; }
+  </style>
+</head>
+<body>
+  ${content}
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('.review-content pre').forEach(function(pre) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'code-block-wrapper';
+        pre.parentNode.insertBefore(wrapper, pre);
+        wrapper.appendChild(pre);
+
+        const btn = document.createElement('button');
+        btn.className = 'copy-btn';
+        btn.textContent = 'Copy';
+        btn.onclick = function() {
+          const code = pre.querySelector('code') || pre;
+          navigator.clipboard.writeText(code.textContent).then(function() {
+            btn.textContent = 'Copied!';
+            btn.classList.add('copied');
+            setTimeout(function() {
+              btn.textContent = 'Copy';
+              btn.classList.remove('copied');
+            }, 2000);
+          });
+        };
+        wrapper.appendChild(btn);
+      });
+    });
+  </script>
+</body>
+</html>`;
+
+function extractPRMetadata(filePath: string): { title: string; author: string } {
+  try {
+    const content = fs.readFileSync(filePath, "utf-8");
+    const titleMatch = content.match(/^# PR Review: (.+)$/m);
+    const authorMatch = content.match(/^\*\*Author:\*\* (.+)$/m);
+    return {
+      title: titleMatch?.[1] || "Untitled",
+      author: authorMatch?.[1] || "unknown",
+    };
+  } catch {
+    return { title: "Untitled", author: "unknown" };
+  }
+}
+
+function startWebServer(): void {
+  const reviewsBaseDir = path.join(CONFIG.workDir, "reviews");
+
+  Bun.serve({
+    port: CONFIG.webPort,
+    hostname: "0.0.0.0",
+    fetch(req) {
+      const url = new URL(req.url);
+      const pathname = decodeURIComponent(url.pathname);
+
+      // Home - list all repos with reviews
+      if (pathname === "/" || pathname === "") {
+        let repos: string[] = [];
+        if (fs.existsSync(reviewsBaseDir)) {
+          repos = fs.readdirSync(reviewsBaseDir, { withFileTypes: true })
+            .filter(d => d.isDirectory())
+            .map(d => d.name)
+            .sort();
+        }
+
+        const content = repos.length > 0
+          ? `<ul class="list">${repos.map(r =>
+              `<li><a href="/repo/${encodeURIComponent(r)}">${r.replace("_", "/")}</a></li>`
+            ).join("")}</ul>`
+          : `<p class="empty">No reviews yet. Reviews will appear here once PRs are processed.</p>`;
+
+        return new Response(HTML_TEMPLATE("Home", `
+          <h1>PR Reviews</h1>
+          <p>Select a repository to view its reviews:</p>
+          ${content}
+        `), {
+          headers: { "Content-Type": "text/html" },
+        });
+      }
+
+      // Repo - list reviews for a repo
+      const repoMatch = pathname.match(/^\/repo\/([^/]+)\/?$/);
+      if (repoMatch) {
+        const repoName = repoMatch[1];
+        const repoDir = path.join(reviewsBaseDir, repoName);
+
+        if (!fs.existsSync(repoDir)) {
+          return new Response(HTML_TEMPLATE("Not Found", `
+            <div class="breadcrumb"><a href="/">Home</a></div>
+            <h1>Repository Not Found</h1>
+            <p class="empty">No reviews found for ${repoName.replace("_", "/")}</p>
+          `), {
+            status: 404,
+            headers: { "Content-Type": "text/html" },
+          });
+        }
+
+        const reviews = fs.readdirSync(repoDir)
+          .filter(f => f.endsWith(".md"))
+          .sort((a, b) => {
+            const numA = parseInt(a.match(/\d+/)?.[0] || "0", 10);
+            const numB = parseInt(b.match(/\d+/)?.[0] || "0", 10);
+            return numB - numA;
+          });
+
+        const content = reviews.length > 0
+          ? `<ul class="list">${reviews.map(r => {
+              const prNum = r.match(/pr-review-(\d+)\.md/)?.[1] || r;
+              const filePath = path.join(repoDir, r);
+              const { title, author } = extractPRMetadata(filePath);
+              return `<li><a href="/repo/${encodeURIComponent(repoName)}/${encodeURIComponent(r)}">
+                <div><span class="pr-number">PR #${prNum}</span><span class="pr-title">${title}</span></div>
+                <div class="pr-author">by ${author}</div>
+              </a></li>`;
+            }).join("")}</ul>`
+          : `<p class="empty">No reviews yet for this repository.</p>`;
+
+        return new Response(HTML_TEMPLATE(repoName.replace("_", "/"), `
+          <div class="breadcrumb"><a href="/">Home</a> / ${repoName.replace("_", "/")}</div>
+          <h1>${repoName.replace("_", "/")}</h1>
+          ${content}
+        `), {
+          headers: { "Content-Type": "text/html" },
+        });
+      }
+
+      // Review file - render markdown
+      const reviewMatch = pathname.match(/^\/repo\/([^/]+)\/([^/]+)$/);
+      if (reviewMatch) {
+        const repoName = reviewMatch[1];
+        const fileName = reviewMatch[2];
+        const filePath = path.join(reviewsBaseDir, repoName, fileName);
+
+        if (!fs.existsSync(filePath)) {
+          return new Response(HTML_TEMPLATE("Not Found", `
+            <div class="breadcrumb"><a href="/">Home</a> / <a href="/repo/${encodeURIComponent(repoName)}">${repoName.replace("_", "/")}</a></div>
+            <h1>Review Not Found</h1>
+            <p class="empty">The requested review file does not exist.</p>
+          `), {
+            status: 404,
+            headers: { "Content-Type": "text/html" },
+          });
+        }
+
+        const markdown = fs.readFileSync(filePath, "utf-8");
+        const html = marked(markdown);
+        const prNum = fileName.match(/pr-review-(\d+)\.md/)?.[1] || fileName;
+
+        return new Response(HTML_TEMPLATE(`PR #${prNum}`, `
+          <div class="breadcrumb">
+            <a href="/">Home</a> /
+            <a href="/repo/${encodeURIComponent(repoName)}">${repoName.replace("_", "/")}</a> /
+            PR #${prNum}
+          </div>
+          <div class="review-content">
+            ${html}
+          </div>
+        `), {
+          headers: { "Content-Type": "text/html" },
+        });
+      }
+
+      // 404
+      return new Response(HTML_TEMPLATE("Not Found", `
+        <div class="breadcrumb"><a href="/">Home</a></div>
+        <h1>Page Not Found</h1>
+        <p><a href="/">Go back home</a></p>
+      `), {
+        status: 404,
+        headers: { "Content-Type": "text/html" },
+      });
+    },
+  });
+
+  logger.info({ port: CONFIG.webPort, url: `http://localhost:${CONFIG.webPort}` }, "Review browser started");
+}
+
+// =============================================================================
 // Main
 // =============================================================================
 
-async function main() {
+async function main(): Promise<void> {
   console.log(`
 +------------------------------------------------------------+
 |              PR Review Daemon (Claude Code)                |
@@ -711,7 +1025,7 @@ async function main() {
   // Check gh CLI is authenticated
   try {
     execSync("gh auth status", { stdio: "pipe" });
-  } catch (e) {
+  } catch {
     logger.fatal("gh CLI is not authenticated. Run: gh auth login");
     process.exit(1);
   }
@@ -739,6 +1053,9 @@ async function main() {
     }
   }
 
+  // Start web server for browsing reviews
+  startWebServer();
+
   // Initial poll
   await poll();
 
@@ -753,6 +1070,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  logger.fatal({ error: e.message }, "Fatal error");
+  logger.fatal({ error: (e as Error).message }, "Fatal error");
   process.exit(1);
 });
