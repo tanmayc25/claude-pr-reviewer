@@ -285,7 +285,6 @@ export async function runReview(
 
   // Build context from previous versions
   const contextSection = buildPreviousContext(prReviewDir);
-  const isFirstReview = contextSection === "";
 
   logger.info("Running Claude Code review...");
 

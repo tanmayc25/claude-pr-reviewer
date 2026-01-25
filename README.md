@@ -86,46 +86,43 @@ Then open http://localhost:3456 to browse reviews in your browser.
 
 ## Output
 
-Reviews are saved to: `./reviews/<org>_<repo>/pr-review-<number>.md`
+Reviews are saved in a versioned directory structure:
 
 ```
 claude-pr-reviewer/
-├── mycompany_repo/           # cloned repo (clean)
+├── mycompany_repo/              # cloned repo (clean)
 │   └── ... (repo files only)
 ├── reviews/
 │   └── mycompany_repo/
-│       ├── pr-review-42.md
-│       └── pr-review-43.md
+│       ├── pr-42/               # Directory per PR
+│       │   ├── meta.json        # PR metadata
+│       │   ├── v-20240125T143022Z.md   # Version files (newest)
+│       │   ├── v-20240125T103000Z.md   # (older)
+│       │   └── ...
+│       └── pr-43/
+│           └── ...
 ```
 
-Each review file accumulates reviews over time as the PR is updated:
+Each version file contains a single review:
 
 ```markdown
-# PR Review: Fix authentication bug
-
-**Repository:** mycompany/api
-
-**PR:** #42
-
-**Author:** yourname
-
-**URL:** https://github.com/mycompany/api/pull/42
-
-**Created:** 2024-01-25T10:30:00.000Z
-
----
-
-## Review @ 2024-01-25T10:30:00.000Z
+## Review @ 2024-01-25T14:30:22Z
 **Commit:** `abc123f`
 
 <review content>
+```
 
----
+The `meta.json` stores PR metadata:
 
-## Review @ 2024-01-25T14:45:00.000Z
-**Commit:** `def456a`
-
-<follow-up review with context from previous>
+```json
+{
+  "title": "Fix authentication bug",
+  "repoFullName": "mycompany/api",
+  "prNumber": 42,
+  "author": "yourname",
+  "url": "https://github.com/mycompany/api/pull/42",
+  "createdAt": "2024-01-25T10:30:00.000Z"
+}
 ```
 
 ## Web Interface
@@ -134,10 +131,17 @@ The built-in web server at http://localhost:3456 provides:
 
 - List of all repositories with reviews
 - PR listing with title, author, and last synced time
+- **Tabbed version viewer**: Switch between review versions (latest shown by default)
 - Search functionality to filter repos and PRs
 - Rendered markdown with syntax highlighting
 - Copy buttons on code blocks
+- Re-review button with custom prompt support
+- Delete button to remove reviews
 - Sync button for manual sync mode (or to trigger sync in auto mode)
+
+### Migration
+
+Old single-file reviews (`pr-review-{number}.md`) are automatically migrated to the new versioned directory format when accessed.
 
 ## State
 
