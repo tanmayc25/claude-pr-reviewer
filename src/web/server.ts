@@ -6,9 +6,11 @@ import { logger } from "../logger";
 import { isPolling } from "../state";
 import { poll, getPendingPRs, syncSelectedPRs } from "../poll";
 import { htmlTemplate } from "./template";
-import { homePage, pendingPage, repoPage, reviewPageWithVersions, notFoundPage } from "./pages";
+import { homePage, pendingPage, repoPage, reviewPageWithVersions, notFoundPage, settingsPage } from "./pages";
 import { getPRReviewDir, getPRMeta, listVersions, readVersion, migrateOldFormat } from "../review";
-import type { PRMetadata, PRReviewMeta } from "../types";
+import { editableConfig, envDefaultConfig, staticConfig, updateSettings, resetSettings, validateSettings } from "../settings";
+import { reloadRepoPatterns } from "../github";
+import type { PRMetadata, PRReviewMeta, EditableSettings } from "../types";
 import type { ReviewItem, VersionTab } from "./pages";
 
 function extractPRMetadataFromMeta(meta: PRReviewMeta, versions: { timestamp: string }[]): PRMetadata {
@@ -136,6 +138,52 @@ function handleStatus(): Response {
     syncing: isPolling,
     mode: CONFIG.syncMode,
     lastPoll: new Date().toISOString(),
+  });
+}
+
+// Settings API handlers
+function handleGetSettings(): Response {
+  return Response.json({
+    settings: { ...editableConfig },
+    defaults: { ...envDefaultConfig },
+    restartRequired: {
+      webPort: staticConfig.webPort,
+      workDir: staticConfig.workDir,
+    },
+  });
+}
+
+async function handleUpdateSettings(req: Request): Promise<Response> {
+  try {
+    const updates = await req.json() as Partial<EditableSettings>;
+    const errors = updateSettings(updates);
+
+    if (errors.length > 0) {
+      return Response.json({ success: false, errors }, { status: 400 });
+    }
+
+    // Reload repo patterns if they changed
+    if (updates.repoPatterns !== undefined) {
+      reloadRepoPatterns();
+    }
+
+    logger.info({ updates }, "Settings updated");
+    return Response.json({ success: true, settings: { ...editableConfig } });
+  } catch (error) {
+    return Response.json({ success: false, error: (error as Error).message }, { status: 500 });
+  }
+}
+
+function handleResetSettings(): Response {
+  resetSettings();
+  reloadRepoPatterns();
+  logger.info("Settings reset to defaults");
+  return Response.json({ success: true, settings: { ...editableConfig } });
+}
+
+function handleSettingsPage(): Response {
+  return new Response(htmlTemplate("Settings", settingsPage()), {
+    headers: { "Content-Type": "text/html" },
   });
 }
 
@@ -388,6 +436,19 @@ export function startWebServer(): void {
         return handleStatus();
       }
 
+      // Settings API routes
+      if (pathname === "/api/settings" && req.method === "GET") {
+        return handleGetSettings();
+      }
+
+      if (pathname === "/api/settings" && req.method === "POST") {
+        return handleUpdateSettings(req);
+      }
+
+      if (pathname === "/api/settings/reset" && req.method === "POST") {
+        return handleResetSettings();
+      }
+
       // Page routes
       if (pathname === "/" || pathname === "") {
         return handleHomePage(reviewsBaseDir);
@@ -395,6 +456,10 @@ export function startWebServer(): void {
 
       if (pathname === "/pending") {
         return handlePendingPage();
+      }
+
+      if (pathname === "/settings") {
+        return handleSettingsPage();
       }
 
       const repoMatch = pathname.match(/^\/repo\/([^/]+)\/?$/);

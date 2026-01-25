@@ -39,7 +39,33 @@ function matchesRepoPatterns(repoName: string, exact: string[], regexes: RegExp[
   return false;
 }
 
-export const { exact: exactRepos, regexes: repoRegexes } = parseRepoPatterns(CONFIG.repoPatterns);
+// Mutable repo pattern state
+let exactRepos: string[] = [];
+let repoRegexes: RegExp[] = [];
+
+// Initialize patterns
+function initRepoPatterns(): void {
+  const parsed = parseRepoPatterns(CONFIG.repoPatterns);
+  exactRepos = parsed.exact;
+  repoRegexes = parsed.regexes;
+}
+
+// Reload patterns (called when settings change)
+export function reloadRepoPatterns(): void {
+  initRepoPatterns();
+}
+
+// Export getters for the patterns
+export function getExactRepos(): string[] {
+  return exactRepos;
+}
+
+export function getRepoRegexes(): RegExp[] {
+  return repoRegexes;
+}
+
+// Initialize on module load
+initRepoPatterns();
 
 export async function getOpenPRs(): Promise<PRDetails[]> {
   let prs: PRDetails[] = [];

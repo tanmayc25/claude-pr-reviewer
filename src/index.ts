@@ -2,7 +2,7 @@ import { execSync } from "child_process";
 import { CONFIG } from "./config";
 import { logger } from "./logger";
 import { loadState } from "./state";
-import { exactRepos, repoRegexes } from "./github";
+import { getExactRepos, getRepoRegexes } from "./github";
 import { poll } from "./poll";
 import { runCleanup } from "./cleanup";
 import { startWebServer } from "./web/server";
@@ -36,6 +36,8 @@ async function main(): Promise<void> {
     cleanupAge: `${CONFIG.cleanupAgeDays} days`,
   }, "Configuration loaded");
 
+  const exactRepos = getExactRepos();
+  const repoRegexes = getRepoRegexes();
   if (exactRepos.length === 0 && repoRegexes.length === 0) {
     logger.info("Monitoring: All PRs involving you");
   } else {

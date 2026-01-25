@@ -370,6 +370,90 @@ export const htmlTemplate = (title: string, content: string): string => `<!DOCTY
       border-radius: 0 0 8px 8px;
       border-top: none;
     }
+    /* Settings form styles */
+    .settings-form { margin-top: 16px; }
+    .settings-section {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .settings-section-readonly {
+      background: var(--bg-tertiary);
+    }
+    .settings-section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 0 0 16px 0;
+      padding: 0;
+      border: none;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-group:last-child { margin-bottom: 0; }
+    .form-group label {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-primary);
+      margin-bottom: 6px;
+    }
+    .form-help {
+      display: block;
+      font-size: 12px;
+      color: var(--text-dimmed);
+      margin-top: 4px;
+    }
+    .form-row {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .form-row .form-group {
+      flex: 1;
+      min-width: 150px;
+    }
+    .checkbox-group {
+      display: flex;
+      flex-direction: column;
+    }
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      color: var(--text-primary);
+    }
+    .checkbox-label input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent-blue);
+      cursor: pointer;
+    }
+    .readonly-value {
+      padding: 10px 14px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      font-size: 14px;
+      color: var(--text-secondary);
+      font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+      word-break: break-all;
+    }
+    select.input-field {
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236c757d' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      padding-right: 32px;
+    }
   </style>
 </head>
 <body>

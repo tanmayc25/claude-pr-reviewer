@@ -24,6 +24,10 @@ export function homePage(repos: string[], syncMode: string): string {
 
   const headerButtons = `
     <div class="header-buttons">
+      <a href="/settings" class="sync-btn">
+        ${icons.settings}
+        Settings
+      </a>
       <a href="/pending" class="sync-btn">
         ${icons.checkbox}
         Select PRs
@@ -428,5 +432,260 @@ export function notFoundPage(message: string, breadcrumb?: string): string {
     <div class="breadcrumb">${breadcrumbHtml}</div>
     <h1>Not Found</h1>
     <p class="empty">${message}</p>
+  `;
+}
+
+export function settingsPage(): string {
+  return `
+    <div class="breadcrumb"><a href="/">Home</a> / Settings</div>
+    <div class="header">
+      <h1>Settings</h1>
+      <div class="header-buttons">
+        <button id="reset-btn" class="btn">Reset to Defaults</button>
+        <button id="save-btn" class="sync-btn">
+          ${icons.sync}
+          Save Settings
+        </button>
+      </div>
+    </div>
+    <div class="sync-status" id="settings-status">Loading settings...</div>
+
+    <form id="settings-form" class="settings-form">
+      <!-- GitHub Section -->
+      <div class="settings-section">
+        <h3 class="settings-section-title">GitHub</h3>
+        <div class="form-group">
+          <label for="githubUsername">Username</label>
+          <input type="text" id="githubUsername" name="githubUsername" class="input-field" placeholder="your-username" />
+          <span class="form-help">Your GitHub username for filtering PRs</span>
+        </div>
+        <div class="form-group">
+          <label for="repoPatterns">Repository Patterns</label>
+          <input type="text" id="repoPatterns" name="repoPatterns" class="input-field" placeholder="owner/repo, /regex-pattern/" />
+          <span class="form-help">Comma-separated list. Use /pattern/ for regex. Leave empty to monitor all PRs.</span>
+        </div>
+      </div>
+
+      <!-- Sync Section -->
+      <div class="settings-section">
+        <h3 class="settings-section-title">Sync</h3>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="syncMode">Mode</label>
+            <select id="syncMode" name="syncMode" class="input-field">
+              <option value="auto">Auto</option>
+              <option value="manual">Manual</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="pollInterval">Interval (seconds)</label>
+            <input type="number" id="pollInterval" name="pollInterval" class="input-field" min="10" max="3600" />
+            <span class="form-help">10-3600 sec</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Review Filtering Section -->
+      <div class="settings-section">
+        <h3 class="settings-section-title">Review Filtering</h3>
+        <div class="form-row">
+          <div class="form-group checkbox-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="onlyOwnPRs" name="onlyOwnPRs" />
+              <span>Only review my PRs</span>
+            </label>
+            <span class="form-help">Only review PRs you authored</span>
+          </div>
+          <div class="form-group checkbox-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="reviewOwnPRs" name="reviewOwnPRs" />
+              <span>Include my PRs</span>
+            </label>
+            <span class="form-help">Include your own PRs in reviews</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Review Options Section -->
+      <div class="settings-section">
+        <h3 class="settings-section-title">Review Options</h3>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="parallelReviews">Parallel Reviews</label>
+            <input type="number" id="parallelReviews" name="parallelReviews" class="input-field" min="1" max="10" />
+            <span class="form-help">1-10 concurrent</span>
+          </div>
+          <div class="form-group">
+            <label for="maxReviewVersions">Max Versions</label>
+            <input type="number" id="maxReviewVersions" name="maxReviewVersions" class="input-field" min="1" max="100" />
+            <span class="form-help">Max versions per PR</span>
+          </div>
+          <div class="form-group">
+            <label for="contextVersions">Context Versions</label>
+            <input type="number" id="contextVersions" name="contextVersions" class="input-field" min="0" max="10" />
+            <span class="form-help">Previous versions for Claude</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cleanup Section -->
+      <div class="settings-section">
+        <h3 class="settings-section-title">Cleanup</h3>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="cleanupIntervalHours">Interval (hours)</label>
+            <input type="number" id="cleanupIntervalHours" name="cleanupIntervalHours" class="input-field" min="1" />
+            <span class="form-help">How often to run cleanup</span>
+          </div>
+          <div class="form-group">
+            <label for="cleanupAgeDays">Age (days)</label>
+            <input type="number" id="cleanupAgeDays" name="cleanupAgeDays" class="input-field" min="1" />
+            <span class="form-help">Remove closed PRs older than</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Server Info Section (read-only) -->
+      <div class="settings-section settings-section-readonly">
+        <h3 class="settings-section-title">Server (requires restart)</h3>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Port</label>
+            <div class="readonly-value" id="webPort"></div>
+          </div>
+          <div class="form-group">
+            <label>Work Directory</label>
+            <div class="readonly-value" id="workDir"></div>
+          </div>
+        </div>
+      </div>
+    </form>
+
+    <script>
+      (function() {
+        const form = document.getElementById('settings-form');
+        const saveBtn = document.getElementById('save-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const statusEl = document.getElementById('settings-status');
+
+        let currentSettings = {};
+        let defaults = {};
+
+        // Load settings
+        async function loadSettings() {
+          try {
+            const res = await fetch('/api/settings');
+            const data = await res.json();
+            currentSettings = data.settings;
+            defaults = data.defaults;
+
+            // Populate form
+            document.getElementById('githubUsername').value = currentSettings.githubUsername || '';
+            document.getElementById('repoPatterns').value = (currentSettings.repoPatterns || []).join(', ');
+            document.getElementById('pollInterval').value = currentSettings.pollInterval || 60;
+            document.getElementById('syncMode').value = currentSettings.syncMode || 'auto';
+            document.getElementById('onlyOwnPRs').checked = currentSettings.onlyOwnPRs || false;
+            document.getElementById('reviewOwnPRs').checked = currentSettings.reviewOwnPRs || false;
+            document.getElementById('parallelReviews').value = currentSettings.parallelReviews || 3;
+            document.getElementById('maxReviewVersions').value = currentSettings.maxReviewVersions || 10;
+            document.getElementById('contextVersions').value = currentSettings.contextVersions || 2;
+            document.getElementById('cleanupIntervalHours').value = currentSettings.cleanupIntervalHours || 24;
+            document.getElementById('cleanupAgeDays').value = currentSettings.cleanupAgeDays || 7;
+
+            // Read-only server info
+            document.getElementById('webPort').textContent = data.restartRequired.webPort;
+            document.getElementById('workDir').textContent = data.restartRequired.workDir;
+
+            statusEl.textContent = 'Settings loaded';
+          } catch (err) {
+            statusEl.textContent = 'Error loading settings: ' + err.message;
+          }
+        }
+
+        // Gather form values
+        function gatherFormValues() {
+          const patternsStr = document.getElementById('repoPatterns').value;
+          const repoPatterns = patternsStr
+            ? patternsStr.split(',').map(s => s.trim()).filter(Boolean)
+            : [];
+
+          return {
+            githubUsername: document.getElementById('githubUsername').value.trim(),
+            repoPatterns,
+            pollInterval: parseInt(document.getElementById('pollInterval').value, 10),
+            syncMode: document.getElementById('syncMode').value,
+            onlyOwnPRs: document.getElementById('onlyOwnPRs').checked,
+            reviewOwnPRs: document.getElementById('reviewOwnPRs').checked,
+            parallelReviews: parseInt(document.getElementById('parallelReviews').value, 10),
+            maxReviewVersions: parseInt(document.getElementById('maxReviewVersions').value, 10),
+            contextVersions: parseInt(document.getElementById('contextVersions').value, 10),
+            cleanupIntervalHours: parseInt(document.getElementById('cleanupIntervalHours').value, 10),
+            cleanupAgeDays: parseInt(document.getElementById('cleanupAgeDays').value, 10),
+          };
+        }
+
+        // Save settings
+        saveBtn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          saveBtn.disabled = true;
+          saveBtn.classList.add('syncing');
+          statusEl.textContent = 'Saving settings...';
+
+          try {
+            const values = gatherFormValues();
+            const res = await fetch('/api/settings', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(values)
+            });
+            const data = await res.json();
+
+            if (data.success) {
+              currentSettings = data.settings;
+              statusEl.textContent = 'Settings saved successfully';
+            } else if (data.errors) {
+              const errorMessages = data.errors.map(e => e.field + ': ' + e.message).join(', ');
+              statusEl.textContent = 'Validation errors: ' + errorMessages;
+            } else {
+              statusEl.textContent = 'Error: ' + (data.error || 'Unknown error');
+            }
+          } catch (err) {
+            statusEl.textContent = 'Error saving settings: ' + err.message;
+          } finally {
+            saveBtn.disabled = false;
+            saveBtn.classList.remove('syncing');
+          }
+        });
+
+        // Reset to defaults
+        resetBtn.addEventListener('click', async () => {
+          if (!confirm('Reset all settings to their default values from .env?')) return;
+
+          resetBtn.disabled = true;
+          statusEl.textContent = 'Resetting settings...';
+
+          try {
+            const res = await fetch('/api/settings/reset', { method: 'POST' });
+            const data = await res.json();
+
+            if (data.success) {
+              currentSettings = data.settings;
+              // Reload form with new values
+              await loadSettings();
+              statusEl.textContent = 'Settings reset to defaults';
+            } else {
+              statusEl.textContent = 'Error: ' + (data.error || 'Unknown error');
+            }
+          } catch (err) {
+            statusEl.textContent = 'Error resetting settings: ' + err.message;
+          } finally {
+            resetBtn.disabled = false;
+          }
+        });
+
+        // Initial load
+        loadSettings();
+      })();
+    </script>
   `;
 }

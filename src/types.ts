@@ -35,3 +35,17 @@ export interface PRReviewMeta {
   url: string;
   createdAt: string;
 }
+
+export interface EditableSettings {
+  githubUsername: string;
+  repoPatterns: string[];
+  pollInterval: number;
+  syncMode: "auto" | "manual";
+  onlyOwnPRs: boolean;
+  reviewOwnPRs: boolean;
+  parallelReviews: number;
+  maxReviewVersions: number;
+  contextVersions: number;
+  cleanupIntervalHours: number;
+  cleanupAgeDays: number;
+}
