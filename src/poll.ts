@@ -78,6 +78,89 @@ async function processPR(pr: PRDetails): Promise<string | null> {
   }
 }
 
+export interface PendingPR {
+  repo: string;
+  number: number;
+  title: string;
+  author: string;
+  hasChanges: boolean;
+}
+
+export async function getPendingPRs(): Promise<PendingPR[]> {
+  const prs = await getOpenPRs();
+
+  // Filter PRs based on config
+  const filteredPRs = prs.filter((pr) => {
+    const authorLogin = typeof pr.author === "object" ? pr.author?.login : pr.author;
+    const isOwnPR = CONFIG.githubUsername && authorLogin === CONFIG.githubUsername;
+
+    if (CONFIG.onlyOwnPRs && !isOwnPR) return false;
+    if (!CONFIG.onlyOwnPRs && !CONFIG.reviewOwnPRs && isOwnPR) return false;
+    return true;
+  });
+
+  return filteredPRs.map((pr) => {
+    const prKey = `${pr.repo}#${pr.number}`;
+    const lastSha = prState.get(prKey);
+    const currentSha = pr.headRefOid;
+    const authorLogin = typeof pr.author === "object" ? pr.author?.login : pr.author;
+
+    return {
+      repo: pr.repo!,
+      number: pr.number,
+      title: pr.title,
+      author: authorLogin || "unknown",
+      hasChanges: !lastSha || lastSha !== currentSha,
+    };
+  });
+}
+
+export async function syncSelectedPRs(
+  selectedPRs: Array<{ repo: string; number: number }>
+): Promise<{ processed: number; errors: number }> {
+  if (isPolling) {
+    throw new Error("Sync already in progress");
+  }
+
+  setPolling(true);
+  logger.info({ count: selectedPRs.length }, "Syncing selected PRs");
+
+  let processed = 0;
+  let errors = 0;
+
+  try {
+    // Fetch full PR details for each selected PR
+    const allPRs = await getOpenPRs();
+    const prMap = new Map(allPRs.map((pr) => [`${pr.repo}#${pr.number}`, pr]));
+
+    for (const { repo, number } of selectedPRs) {
+      const prKey = `${repo}#${number}`;
+      const pr = prMap.get(prKey);
+
+      if (!pr) {
+        logger.warn({ pr: prKey }, "PR not found, skipping");
+        errors++;
+        continue;
+      }
+
+      try {
+        const result = await processPR(pr);
+        if (result) {
+          processed++;
+        }
+      } catch (error) {
+        logger.error({ pr: prKey, error: (error as Error).message }, "Error processing PR");
+        errors++;
+      }
+    }
+
+    logger.info({ processed, errors }, "Selected PR sync complete");
+    return { processed, errors };
+  } finally {
+    setPolling(false);
+  }
+}
+
 export async function poll(): Promise<void> {
   // Prevent concurrent polls
   if (isPolling) {

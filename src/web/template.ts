@@ -4,6 +4,8 @@ export const htmlTemplate = (title: string, content: string): string => `<!DOCTY
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title} - PR Reviews</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -138,6 +140,73 @@ export const htmlTemplate = (title: string, content: string): string => `<!DOCTY
     .sync-btn.syncing .sync-icon { animation: spin 1s linear infinite; }
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     .sync-status { font-size: 13px; color: #52525b; margin-top: 8px; }
+    .header-buttons { display: flex; gap: 8px; }
+    .pending-list { list-style: none; }
+    .pending-list li {
+      padding: 16px;
+      margin: 8px 0;
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 8px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .pending-list li:hover { border-color: #3f3f46; background: #1f1f23; }
+    .pending-list input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      margin-top: 4px;
+      accent-color: #3b82f6;
+      cursor: pointer;
+    }
+    .pending-list .pr-info { flex: 1; }
+    .pending-list .pr-header { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+    .pending-list .pr-number { font-weight: 600; color: #fafafa; }
+    .pending-list .pr-title { color: #a1a1aa; }
+    .pending-list .pr-meta { display: flex; gap: 16px; color: #52525b; font-size: 13px; margin-top: 8px; }
+    .pending-list .pr-repo { color: #71717a; font-size: 13px; }
+    .has-changes {
+      display: inline-block;
+      background: #22c55e;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: 8px;
+    }
+    .no-changes {
+      display: inline-block;
+      background: #52525b;
+      color: #a1a1aa;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: 8px;
+    }
+    .pending-actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    .select-all-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #a1a1aa;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .select-all-label input {
+      width: 16px;
+      height: 16px;
+      accent-color: #3b82f6;
+      cursor: pointer;
+    }
+    .selection-count { color: #52525b; font-size: 13px; }
   </style>
 </head>
 <body>
@@ -168,6 +237,11 @@ export const htmlTemplate = (title: string, content: string): string => `<!DOCTY
           });
         };
         wrapper.appendChild(btn);
+      });
+
+      // Syntax highlighting
+      document.querySelectorAll('.review-content pre code').forEach((block) => {
+        hljs.highlightElement(block);
       });
 
       // Search functionality
