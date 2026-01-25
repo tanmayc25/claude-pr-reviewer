@@ -4,6 +4,7 @@ import { CONFIG } from "./config";
 import { logger } from "./logger";
 import { prState, saveState } from "./state";
 import { isPROpen } from "./github";
+import { pruneVersions } from "./review";
 
 export function cleanupClosedPRs(): void {
   logger.info("Checking for closed PRs to clean up...");
@@ -91,9 +92,50 @@ export function cleanupOldRepos(): void {
   }
 }
 
+export function cleanupReviewVersions(): void {
+  logger.info({ maxVersions: CONFIG.maxReviewVersions }, "Pruning excess review versions...");
+
+  const reviewsDir = path.join(CONFIG.workDir, "reviews");
+  if (!fs.existsSync(reviewsDir)) return;
+
+  let prunedCount = 0;
+
+  // Iterate through all repo directories
+  const repoDirs = fs.readdirSync(reviewsDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory());
+
+  for (const repoEntry of repoDirs) {
+    const repoPath = path.join(reviewsDir, repoEntry.name);
+
+    // Find all PR directories (new format: pr-{number})
+    const prDirs = fs.readdirSync(repoPath, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && d.name.startsWith("pr-"));
+
+    for (const prEntry of prDirs) {
+      const prReviewDir = path.join(repoPath, prEntry.name);
+
+      // Count versions before pruning
+      const versionsBefore = fs.readdirSync(prReviewDir)
+        .filter((f) => f.startsWith("v-") && f.endsWith(".md")).length;
+
+      if (versionsBefore > CONFIG.maxReviewVersions) {
+        pruneVersions(prReviewDir);
+        prunedCount++;
+      }
+    }
+  }
+
+  if (prunedCount > 0) {
+    logger.info({ prsProcessed: prunedCount }, "Pruned review versions");
+  } else {
+    logger.debug("No review versions to prune");
+  }
+}
+
 export async function runCleanup(): Promise<void> {
   logger.info("--- Running cleanup ---");
   cleanupClosedPRs();
   cleanupOldRepos();
+  cleanupReviewVersions();
   logger.info("--- Cleanup complete ---");
 }

@@ -1,4 +1,5 @@
 import { icons } from "./icons";
+import type { PRReviewMeta } from "../types";
 
 export interface ReviewItem {
   fileName: string;
@@ -6,6 +7,16 @@ export interface ReviewItem {
   title: string;
   author: string;
   lastSynced: string;
+  isVersioned?: boolean;
+}
+
+export interface VersionTab {
+  label: string;
+  timestamp: string;
+  commitSha: string;
+  dateStr: string;
+  html: string;
+  isLatest: boolean;
 }
 
 export function homePage(repos: string[], syncMode: string): string {
@@ -336,16 +347,78 @@ function repoPageScript(): string {
   `;
 }
 
-export function reviewPage(repoName: string, prNum: string, html: string): string {
+export function reviewPageWithVersions(
+  repoName: string,
+  prNum: string,
+  meta: PRReviewMeta | null,
+  versions: VersionTab[]
+): string {
+  const repoFullName = repoName.replace("_", "/");
+  const title = meta?.title || `PR #${prNum}`;
+  const prUrl = meta?.url || `https://github.com/${repoFullName}/pull/${prNum}`;
+
+  // Build tabs HTML
+  const tabsHtml = versions.map((v, index) => `
+    <button class="version-tab${v.isLatest ? " active" : ""}" data-index="${index}">
+      ${v.label}
+    </button>
+  `).join("");
+
+  // Build version contents HTML
+  const contentsHtml = versions.map((v, index) => `
+    <div class="version-content${v.isLatest ? " active" : ""}" data-index="${index}">
+      <div class="version-header">
+        <span class="version-commit">Commit: <code>${v.commitSha}</code></span>
+        <span class="version-date">${v.dateStr}</span>
+      </div>
+      <div class="review-content">
+        ${v.html}
+      </div>
+    </div>
+  `).join("");
+
+  const versionScript = `
+    <script>
+      (function() {
+        const tabs = document.querySelectorAll('.version-tab');
+        const contents = document.querySelectorAll('.version-content');
+
+        tabs.forEach(tab => {
+          tab.addEventListener('click', () => {
+            const index = tab.dataset.index;
+
+            // Update tab states
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+
+            // Update content visibility
+            contents.forEach(c => c.classList.remove('active'));
+            document.querySelector('.version-content[data-index="' + index + '"]').classList.add('active');
+          });
+        });
+      })();
+    </script>
+  `;
+
   return `
     <div class="breadcrumb">
       <a href="/">Home</a> /
-      <a href="/repo/${encodeURIComponent(repoName)}">${repoName.replace("_", "/")}</a> /
+      <a href="/repo/${encodeURIComponent(repoName)}">${repoFullName}</a> /
       PR #${prNum}
     </div>
-    <div class="review-content">
-      ${html}
+    <div class="review-header">
+      <h1>${title}</h1>
+      <a href="${prUrl}" target="_blank" class="pr-link-external">View on GitHub</a>
     </div>
+    ${versions.length > 1 ? `
+    <div class="version-tabs">
+      ${tabsHtml}
+    </div>
+    ` : ""}
+    <div class="version-contents">
+      ${contentsHtml}
+    </div>
+    ${versions.length > 1 ? versionScript : ""}
   `;
 }
 

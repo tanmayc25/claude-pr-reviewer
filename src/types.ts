@@ -20,3 +20,18 @@ export interface PRMetadata {
   author: string;
   lastSynced: string;
 }
+
+export interface ReviewVersion {
+  timestamp: string;       // ISO 8601
+  commitSha: string;
+  filename: string;
+}
+
+export interface PRReviewMeta {
+  title: string;
+  repoFullName: string;
+  prNumber: number;
+  author: string;
+  url: string;
+  createdAt: string;
+}

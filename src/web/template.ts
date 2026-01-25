@@ -4,24 +4,24 @@ export const htmlTemplate = (title: string, content: string): string => `<!DOCTY
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${title} - PR Reviews</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <style>
     :root {
-      --bg-primary: #09090b;
-      --bg-secondary: #18181b;
-      --bg-tertiary: #27272a;
-      --bg-hover: #1f1f23;
-      --border-color: #27272a;
-      --border-hover: #3f3f46;
-      --text-primary: #fafafa;
-      --text-secondary: #a1a1aa;
-      --text-muted: #71717a;
-      --text-dimmed: #52525b;
-      --text-content: #d4d4d8;
-      --accent-blue: #3b82f6;
-      --accent-green: #22c55e;
-      --accent-orange: #f59e0b;
+      --bg-primary: #f8f9fa;
+      --bg-secondary: #ffffff;
+      --bg-tertiary: #e9ecef;
+      --bg-hover: #f1f3f5;
+      --border-color: #dee2e6;
+      --border-hover: #ced4da;
+      --text-primary: #212529;
+      --text-secondary: #495057;
+      --text-muted: #6c757d;
+      --text-dimmed: #adb5bd;
+      --text-content: #343a40;
+      --accent-blue: #2563eb;
+      --accent-green: #16a34a;
+      --accent-orange: #ea580c;
       --accent-red: #dc2626;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -306,6 +306,70 @@ export const htmlTemplate = (title: string, content: string): string => `<!DOCTY
     }
     .modal h3 { margin: 0 0 16px 0; font-size: 1.25rem; color: var(--text-primary); }
     .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+    /* Version tabs */
+    .review-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .review-header h1 { margin-bottom: 0; }
+    .pr-link-external {
+      color: var(--text-secondary);
+      font-size: 14px;
+      padding: 8px 12px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      transition: all 0.2s;
+    }
+    .pr-link-external:hover { background: var(--border-hover); color: var(--text-primary); }
+    .version-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border-color);
+      margin-bottom: 0;
+      gap: 0;
+      overflow-x: auto;
+    }
+    .version-tab {
+      padding: 12px 20px;
+      cursor: pointer;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .version-tab:hover { color: var(--text-primary); background: var(--bg-hover); }
+    .version-tab.active {
+      color: var(--accent-blue);
+      border-bottom-color: var(--accent-blue);
+    }
+    .version-contents { margin-top: 0; }
+    .version-content { display: none; }
+    .version-content.active { display: block; }
+    .version-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-color);
+      border-bottom: none;
+      border-radius: 8px 8px 0 0;
+      margin-top: 16px;
+    }
+    .version-commit { font-size: 13px; color: var(--text-secondary); }
+    .version-commit code {
+      background: var(--bg-secondary);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+      color: var(--text-primary);
+    }
+    .version-date { font-size: 13px; color: var(--text-muted); }
+    .version-content .review-content {
+      border-radius: 0 0 8px 8px;
+      border-top: none;
+    }
   </style>
 </head>
 <body>

@@ -33,4 +33,10 @@ export const CONFIG = {
 
   // Number of PRs to review in parallel
   parallelReviews: parseInt(process.env.PARALLEL_REVIEWS || "3", 10),
+
+  // Maximum review versions to keep per PR
+  maxReviewVersions: parseInt(process.env.MAX_REVIEW_VERSIONS || "10", 10),
+
+  // Number of previous versions to pass to Claude for context
+  contextVersions: parseInt(process.env.CONTEXT_VERSIONS || "2", 10),
 };
