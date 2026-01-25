@@ -7,6 +7,8 @@
     "start": "node -r dotenv/config server.js"
   },
   "dependencies": {
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "pino": "^10.3.0",
+    "pino-pretty": "^13.1.3"
   }
 }

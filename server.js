@@ -1,6 +1,24 @@
 const { execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const pino = require("pino");
+
+// =============================================================================
+// Logger Setup
+// =============================================================================
+
+const pretty = require("pino-pretty");
+const logger = pino(
+  {
+    level: process.env.LOG_LEVEL || "info",
+  },
+  pretty({
+    colorize: true,
+    translateTime: "SYS:yyyy-mm-dd HH:MM:ss",
+    ignore: "pid,hostname",
+    sync: true,
+  })
+);
 
 // =============================================================================
 // Configuration
@@ -48,7 +66,7 @@ function parseRepoPatterns(patterns) {
         const regexStr = pattern.slice(1, -1);
         regexes.push(new RegExp(regexStr));
       } catch (e) {
-        log(`Invalid regex pattern: ${pattern} - ${e.message}`);
+        logger.error({ pattern, error: e.message }, "Invalid regex pattern");
       }
     } else {
       exact.push(pattern);
@@ -82,15 +100,18 @@ const { exact: exactRepos, regexes: repoRegexes } = parseRepoPatterns(CONFIG.rep
 const prState = new Map();
 const STATE_FILE = path.join(__dirname, ".pr-state.json");
 
+// Polling lock to prevent concurrent polls
+let isPolling = false;
+
 function loadState() {
   try {
     if (fs.existsSync(STATE_FILE)) {
       const data = JSON.parse(fs.readFileSync(STATE_FILE, "utf-8"));
       Object.entries(data).forEach(([k, v]) => prState.set(k, v));
-      log(`Loaded state for ${prState.size} PRs`);
+      logger.info({ count: prState.size }, "Loaded PR state");
     }
   } catch (e) {
-    log(`Could not load state: ${e.message}`);
+    logger.error({ error: e.message }, "Could not load state");
   }
 }
 
@@ -99,17 +120,13 @@ function saveState() {
     const data = Object.fromEntries(prState);
     fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2));
   } catch (e) {
-    log(`Could not save state: ${e.message}`);
+    logger.error({ error: e.message }, "Could not save state");
   }
 }
 
 // =============================================================================
 // Utilities
 // =============================================================================
-
-function log(message) {
-  console.log(`[${new Date().toISOString()}] ${message}`);
-}
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) {
@@ -126,16 +143,28 @@ function ghCommand(args, options = {}) {
     }).trim();
   } catch (e) {
     if (!options.ignoreError) {
-      log(`gh command failed: ${e.message}`);
+      logger.error({ command: `gh ${args}`, error: e.message }, "gh command failed");
     }
     return null;
+  }
+}
+
+function safeJsonParse(str, fallback = null) {
+  try {
+    return JSON.parse(str);
+  } catch (e) {
+    logger.warn({ error: e.message }, "JSON parse failed");
+    return fallback;
   }
 }
 
 function notify(title, message, subtitle = "") {
   // macOS Notification Center
   try {
-    const script = `display notification "${message.replace(/"/g, '\\"')}" with title "${title.replace(/"/g, '\\"')}"${subtitle ? ` subtitle "${subtitle.replace(/"/g, '\\"')}"` : ""} sound name "Glass"`;
+    const safeMessage = message.replace(/["'\\]/g, " ");
+    const safeTitle = title.replace(/["'\\]/g, " ");
+    const safeSubtitle = subtitle.replace(/["'\\]/g, " ");
+    const script = `display notification "${safeMessage}" with title "${safeTitle}"${safeSubtitle ? ` subtitle "${safeSubtitle}"` : ""} sound name "Glass"`;
     execSync(`osascript -e '${script}'`, { stdio: "pipe" });
   } catch (e) {
     // Ignore notification errors
@@ -157,18 +186,16 @@ function isPROpen(repo, prNumber) {
     ignoreError: true,
   });
   if (result) {
-    try {
-      const { state } = JSON.parse(result);
-      return state === "OPEN";
-    } catch (e) {
-      return true;
+    const parsed = safeJsonParse(result);
+    if (parsed) {
+      return parsed.state === "OPEN";
     }
   }
   return false;
 }
 
 function cleanupClosedPRs() {
-  log("Checking for closed PRs to clean up...");
+  logger.info("Checking for closed PRs to clean up...");
   const keysToRemove = [];
 
   for (const [prKey] of prState.entries()) {
@@ -182,30 +209,30 @@ function cleanupClosedPRs() {
   }
 
   for (const { prKey, repo } of keysToRemove) {
-    log(`PR closed/merged: ${prKey} - removing from state`);
+    logger.info({ pr: prKey }, "PR closed/merged - removing from state");
     prState.delete(prKey);
 
     const repoDir = path.join(CONFIG.workDir, repo.replace("/", "_"));
     if (fs.existsSync(repoDir)) {
       try {
         fs.rmSync(repoDir, { recursive: true, force: true });
-        log(`Deleted local clone: ${repoDir}`);
+        logger.info({ dir: repoDir }, "Deleted local clone");
       } catch (e) {
-        log(`Could not delete ${repoDir}: ${e.message}`);
+        logger.error({ dir: repoDir, error: e.message }, "Could not delete repo");
       }
     }
   }
 
   if (keysToRemove.length > 0) {
     saveState();
-    log(`Cleaned up ${keysToRemove.length} closed PR(s)`);
+    logger.info({ count: keysToRemove.length }, "Cleaned up closed PRs");
   } else {
-    log("No closed PRs to clean up");
+    logger.debug("No closed PRs to clean up");
   }
 }
 
 function cleanupOldRepos() {
-  log(`Cleaning up repos older than ${CONFIG.cleanupAgeDays} days...`);
+  logger.info({ maxAgeDays: CONFIG.cleanupAgeDays }, "Cleaning up old repos...");
 
   if (!fs.existsSync(CONFIG.workDir)) return;
 
@@ -218,6 +245,12 @@ function cleanupOldRepos() {
     if (!entry.isDirectory()) continue;
 
     const dirPath = path.join(CONFIG.workDir, entry.name);
+
+    // Only consider directories that look like repo clones (have .git folder)
+    if (!fs.existsSync(path.join(dirPath, ".git"))) {
+      continue;
+    }
+
     try {
       const stats = fs.statSync(dirPath);
       const age = now - stats.mtimeMs;
@@ -230,27 +263,28 @@ function cleanupOldRepos() {
 
         if (!hasActivePR) {
           fs.rmSync(dirPath, { recursive: true, force: true });
-          log(`Deleted old repo: ${dirPath} (${Math.floor(age / (24 * 60 * 60 * 1000))} days old)`);
+          const ageDays = Math.floor(age / (24 * 60 * 60 * 1000));
+          logger.info({ dir: dirPath, ageDays }, "Deleted old repo");
           cleaned++;
         }
       }
     } catch (e) {
-      log(`Error checking ${dirPath}: ${e.message}`);
+      logger.error({ dir: dirPath, error: e.message }, "Error checking directory");
     }
   }
 
   if (cleaned > 0) {
-    log(`Cleaned up ${cleaned} old repo(s)`);
+    logger.info({ count: cleaned }, "Cleaned up old repos");
   } else {
-    log("No old repos to clean up");
+    logger.debug("No old repos to clean up");
   }
 }
 
 async function runCleanup() {
-  log("\n--- Running cleanup ---");
+  logger.info("--- Running cleanup ---");
   cleanupClosedPRs();
   cleanupOldRepos();
-  log("--- Cleanup complete ---\n");
+  logger.info("--- Cleanup complete ---");
 }
 
 // =============================================================================
@@ -270,8 +304,8 @@ async function getOpenPRs() {
         `pr list --repo ${repo} --json number,title,headRefName,headRefOid,author,updatedAt --limit 50`
       );
       if (result) {
-        const repoPRs = JSON.parse(result).map((pr) => ({ ...pr, repo }));
-        prs = prs.concat(repoPRs);
+        const repoPRs = safeJsonParse(result, []);
+        prs = prs.concat(repoPRs.map((pr) => ({ ...pr, repo })));
       }
     }
   }
@@ -282,7 +316,7 @@ async function getOpenPRs() {
       `search prs --state=open --involves=@me --json repository,number,title,author,updatedAt --limit 100`
     );
     if (result) {
-      const searchResults = JSON.parse(result);
+      const searchResults = safeJsonParse(result, []);
 
       for (const pr of searchResults) {
         const repoName =
@@ -303,8 +337,10 @@ async function getOpenPRs() {
           `pr view ${pr.number} --repo ${repoName} --json number,title,headRefName,headRefOid,author,updatedAt`
         );
         if (prDetails) {
-          const fullPR = JSON.parse(prDetails);
-          prs.push({ ...fullPR, repo: repoName });
+          const fullPR = safeJsonParse(prDetails);
+          if (fullPR) {
+            prs.push({ ...fullPR, repo: repoName });
+          }
         }
       }
     }
@@ -322,38 +358,19 @@ async function cloneOrUpdateRepo(repoFullName) {
   ensureDir(CONFIG.workDir);
 
   if (fs.existsSync(path.join(repoDir, ".git"))) {
-    log(`Fetching updates: ${repoFullName}`);
+    logger.info({ repo: repoFullName }, "Fetching updates");
     execSync("git fetch --all --prune", { cwd: repoDir, stdio: "pipe" });
   } else {
-    log(`Cloning repo: ${repoFullName}`);
+    logger.info({ repo: repoFullName }, "Cloning repo");
     execSync(`gh repo clone ${repoFullName} "${repoDir}"`, { stdio: "pipe" });
-  }
-
-  // Add review files to .gitignore
-  const gitignorePath = path.join(repoDir, ".gitignore");
-  const reviewIgnorePattern = "pr-review-*.md";
-
-  try {
-    let gitignoreContent = "";
-    if (fs.existsSync(gitignorePath)) {
-      gitignoreContent = fs.readFileSync(gitignorePath, "utf-8");
-    }
-    if (!gitignoreContent.includes(reviewIgnorePattern)) {
-      fs.appendFileSync(
-        gitignorePath,
-        `\n# PR Review Daemon\n${reviewIgnorePattern}\n`
-      );
-    }
-  } catch (e) {
-    // Ignore gitignore errors
   }
 
   return repoDir;
 }
 
 async function checkoutPRBranch(repoDir, repoFullName, prNumber) {
-  log(`Checking out PR #${prNumber}`);
-  // Reset any local changes (like .gitignore modifications) before checkout
+  logger.info({ pr: prNumber }, "Checking out PR");
+  // Reset any local changes before checkout
   execSync("git checkout -- .", { cwd: repoDir, stdio: "pipe" });
   execSync(`gh pr checkout ${prNumber} --repo ${repoFullName}`, {
     cwd: repoDir,
@@ -366,7 +383,7 @@ async function checkoutPRBranch(repoDir, repoFullName, prNumber) {
 // =============================================================================
 
 async function runReview(repoDir, repoFullName, prNumber, prTitle, commitSha) {
-  log(`Preparing review for PR #${prNumber}: ${prTitle}`);
+  logger.info({ pr: prNumber, title: prTitle }, "Preparing review");
 
   // Get changed files
   let changedFiles = [];
@@ -388,15 +405,18 @@ async function runReview(repoDir, repoFullName, prNumber, prTitle, commitSha) {
       `pr view ${prNumber} --repo ${repoFullName} --json body,author,baseRefName,headRefName,url`
     );
     if (detailsOutput) {
-      prDetails = JSON.parse(detailsOutput);
+      prDetails = safeJsonParse(detailsOutput, {});
     }
   } catch (e) {
     // Ignore
   }
 
-  log(`Changed files: ${changedFiles.slice(0, 5).join(", ")}${changedFiles.length > 5 ? "..." : ""}`);
+  const shortSha = commitSha ? commitSha.slice(0, 7) : "unknown";
+  logger.info({ files: changedFiles.slice(0, 5), total: changedFiles.length }, "Changed files");
 
-  const reviewOutputPath = path.join(repoDir, `pr-review-${prNumber}.md`);
+  const reviewsDir = path.join(CONFIG.workDir, "reviews", repoFullName.replace("/", "_"));
+  ensureDir(reviewsDir);
+  const reviewOutputPath = path.join(reviewsDir, `pr-review-${prNumber}.md`);
 
   // Check for existing reviews (for context)
   let existingReviews = "";
@@ -404,10 +424,10 @@ async function runReview(repoDir, repoFullName, prNumber, prTitle, commitSha) {
   if (fs.existsSync(reviewOutputPath)) {
     existingReviews = fs.readFileSync(reviewOutputPath, "utf-8");
     isFirstReview = false;
-    log("Found previous reviews for context");
+    logger.debug("Found previous reviews for context");
   }
 
-  log("Running Claude Code review...");
+  logger.info("Running Claude Code review...");
 
   // Build prompt with context from previous reviews
   let contextSection = "";
@@ -435,7 +455,7 @@ ${existingReviews}
 **Author:** ${prDetails.author?.login || "unknown"}
 **Branch:** ${prDetails.headRefName || "unknown"} -> ${prDetails.baseRefName || "main"}
 **URL:** ${prDetails.url || `https://github.com/${repoFullName}/pull/${prNumber}`}
-**Commit:** ${commitSha ? commitSha.slice(0, 7) : "unknown"}
+**Commit:** ${shortSha}
 
 ## PR Description
 ${prDetails.body || "(No description provided)"}
@@ -458,22 +478,21 @@ ${contextSection}
 Start by reading the changed files, then provide your review.`;
 
   try {
-    const claudeReview = execSync(
-      `claude -p "${reviewPrompt.replace(/"/g, '\\"').replace(/\n/g, "\\n")}" --print`,
-      {
-        cwd: repoDir,
-        encoding: "utf-8",
-        maxBuffer: 50 * 1024 * 1024,
-        timeout: 600000,
-      }
-    );
+    // Use stdin to pass prompt - avoids all shell escaping issues
+    const claudeReview = execSync("claude --print", {
+      cwd: repoDir,
+      encoding: "utf-8",
+      input: reviewPrompt,
+      maxBuffer: 50 * 1024 * 1024,
+      timeout: 600000,
+    });
 
     const timestamp = new Date().toISOString();
     const reviewEntry = `
 ---
 
 ## Review @ ${timestamp}
-**Commit:** \`${commitSha ? commitSha.slice(0, 7) : "unknown"}\`
+**Commit:** \`${shortSha}\`
 
 ${claudeReview}
 `;
@@ -492,20 +511,22 @@ ${reviewEntry}`;
       fs.appendFileSync(reviewOutputPath, reviewEntry);
     }
 
-    log(`Review saved to: ${reviewOutputPath}`);
+    logger.info({ path: reviewOutputPath }, "Review saved");
     return reviewOutputPath;
   } catch (error) {
-    log(`Claude review error: ${error.message}`);
+    // Truncate error message to avoid bloating the review file
+    const shortError = error.message.slice(0, 500);
+    logger.error({ error: shortError }, "Claude review error");
 
     const timestamp = new Date().toISOString();
     const errorEntry = `
 ---
 
 ## Review @ ${timestamp} (FAILED)
-**Commit:** \`${commitSha ? commitSha.slice(0, 7) : "unknown"}\`
-**Error:** ${error.message}
+**Commit:** \`${shortSha}\`
+**Error:** ${shortError}
 
-The automated review could not be completed. Please review manually.
+The automated review could not be completed. Will retry on next poll.
 `;
 
     if (isFirstReview) {
@@ -534,6 +555,12 @@ async function processPR(pr) {
   const lastSha = prState.get(prKey);
   const currentSha = pr.headRefOid;
 
+  // Skip if no SHA available
+  if (!currentSha) {
+    logger.warn({ pr: prKey }, "No commit SHA available, skipping");
+    return null;
+  }
+
   // Skip if already processed this SHA
   if (lastSha === currentSha) {
     return null;
@@ -556,13 +583,20 @@ async function processPR(pr) {
 
   const isNew = !lastSha;
   const actionType = isNew ? "New PR" : "PR Updated";
+  const shortSha = currentSha.slice(0, 7);
+  const lastShortSha = lastSha ? lastSha.slice(0, 7) : null;
 
-  log(`\n${"=".repeat(60)}`);
-  log(`${actionType}: ${pr.repo}#${pr.number}`);
-  log(`Title: ${pr.title}`);
-  log(`Author: ${authorLogin}`);
-  log(`SHA: ${currentSha.slice(0, 7)}${lastSha ? ` (was: ${lastSha.slice(0, 7)})` : " (new)"}`);
-  log(`${"=".repeat(60)}\n`);
+  logger.info(
+    {
+      action: actionType,
+      pr: prKey,
+      title: pr.title,
+      author: authorLogin,
+      sha: shortSha,
+      previousSha: lastShortSha,
+    },
+    `${actionType} detected`
+  );
 
   notify(
     actionType,
@@ -581,11 +615,16 @@ async function processPR(pr) {
       currentSha
     );
 
-    prState.set(prKey, currentSha);
-    saveState();
+    // Only update state if review succeeded - allows retry on failure
+    if (reviewPath) {
+      prState.set(prKey, currentSha);
+      saveState();
+    } else {
+      logger.warn({ pr: prKey }, "Review failed, will retry on next poll");
+    }
     return reviewPath;
   } catch (error) {
-    log(`Error processing PR: ${error.message}`);
+    logger.error({ pr: prKey, error: error.message.slice(0, 200) }, "Error processing PR");
     return null;
   }
 }
@@ -595,7 +634,14 @@ async function processPR(pr) {
 // =============================================================================
 
 async function poll() {
-  log("Checking for PR updates...");
+  // Prevent concurrent polls
+  if (isPolling) {
+    logger.warn("Previous poll still running, skipping this cycle");
+    return;
+  }
+
+  isPolling = true;
+  logger.info("Checking for PR updates...");
 
   try {
     const prs = await getOpenPRs();
@@ -611,7 +657,7 @@ async function poll() {
       return true;
     });
 
-    log(`Found ${filteredPRs.length} PRs to monitor (${prs.length} total)`);
+    logger.info({ monitored: filteredPRs.length, total: prs.length }, "PRs found");
 
     // List filtered PRs
     for (const pr of filteredPRs) {
@@ -619,24 +665,35 @@ async function poll() {
       const sha = pr.headRefOid ? pr.headRefOid.slice(0, 7) : "?";
       const cached = prState.get(`${pr.repo}#${pr.number}`);
       const status =
-        cached === pr.headRefOid ? "[ok]" : cached ? "[update]" : "[new]";
-      log(`  ${status} ${pr.repo}#${pr.number} [${sha}] by ${authorLogin}: ${pr.title.slice(0, 50)}${pr.title.length > 50 ? "..." : ""}`);
+        cached === pr.headRefOid ? "ok" : cached ? "update" : "new";
+      logger.debug(
+        {
+          status,
+          pr: `${pr.repo}#${pr.number}`,
+          sha,
+          author: authorLogin,
+          title: pr.title.slice(0, 50),
+        },
+        "PR status"
+      );
     }
 
     let processed = 0;
     for (const pr of filteredPRs) {
       const reviewPath = await processPR(pr);
       if (reviewPath) {
-        log(`Review saved: ${reviewPath}`);
+        logger.info({ path: reviewPath }, "Review completed");
         processed++;
       }
     }
 
     if (processed > 0) {
-      log(`Processed ${processed} new/updated PR(s)`);
+      logger.info({ count: processed }, "Processed PRs");
     }
   } catch (error) {
-    log(`Poll error: ${error.message}`);
+    logger.error({ error: error.message }, "Poll error");
+  } finally {
+    isPolling = false;
   }
 }
 
@@ -655,30 +712,32 @@ async function main() {
   try {
     execSync("gh auth status", { stdio: "pipe" });
   } catch (e) {
-    console.error("ERROR: gh CLI is not authenticated. Run: gh auth login");
+    logger.fatal("gh CLI is not authenticated. Run: gh auth login");
     process.exit(1);
   }
 
   ensureDir(CONFIG.workDir);
   loadState();
 
-  log(`Poll interval: ${CONFIG.pollInterval}s`);
-  log(`Work directory: ${CONFIG.workDir}`);
-  log(`GitHub username: ${CONFIG.githubUsername || "(not set)"}`);
-  log(`Review mode: ${CONFIG.onlyOwnPRs ? "Only my PRs" : CONFIG.reviewOwnPRs ? "All PRs" : "Others' PRs only"}`);
-  log(`Cleanup: every ${CONFIG.cleanupIntervalHours}h, delete repos older than ${CONFIG.cleanupAgeDays} days`);
+  logger.info({
+    pollInterval: `${CONFIG.pollInterval}s`,
+    workDir: CONFIG.workDir,
+    githubUsername: CONFIG.githubUsername || "(not set)",
+    reviewMode: CONFIG.onlyOwnPRs ? "Only my PRs" : CONFIG.reviewOwnPRs ? "All PRs" : "Others' PRs only",
+    cleanupInterval: `${CONFIG.cleanupIntervalHours}h`,
+    cleanupAge: `${CONFIG.cleanupAgeDays} days`,
+  }, "Configuration loaded");
 
   if (exactRepos.length === 0 && repoRegexes.length === 0) {
-    log("Monitoring: All PRs involving you");
+    logger.info("Monitoring: All PRs involving you");
   } else {
     if (exactRepos.length > 0) {
-      log(`Monitoring repos: ${exactRepos.join(", ")}`);
+      logger.info({ repos: exactRepos }, "Monitoring exact repos");
     }
     if (repoRegexes.length > 0) {
-      log(`Monitoring patterns: ${repoRegexes.map((r) => `/${r.source}/`).join(", ")}`);
+      logger.info({ patterns: repoRegexes.map((r) => `/${r.source}/`) }, "Monitoring patterns");
     }
   }
-  log("");
 
   // Initial poll
   await poll();
@@ -690,8 +749,10 @@ async function main() {
   await runCleanup();
   setInterval(runCleanup, CONFIG.cleanupIntervalHours * 60 * 60 * 1000);
 
-  log(`\nDaemon running. Press Ctrl+C to stop.`);
-  log(`Next cleanup in ${CONFIG.cleanupIntervalHours} hours.\n`);
+  logger.info({ nextCleanup: `${CONFIG.cleanupIntervalHours} hours` }, "Daemon running. Press Ctrl+C to stop.");
 }
 
-main().catch(console.error);
+main().catch((e) => {
+  logger.fatal({ error: e.message }, "Fatal error");
+  process.exit(1);
+});
