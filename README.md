@@ -98,9 +98,14 @@ Each review file accumulates reviews over time as the PR is updated:
 # PR Review: Fix authentication bug
 
 **Repository:** mycompany/api
+
 **PR:** #42
+
 **Author:** yourname
+
 **URL:** https://github.com/mycompany/api/pull/42
+
+**Created:** 2024-01-25T10:30:00.000Z
 
 ---
 
@@ -122,9 +127,11 @@ Each review file accumulates reviews over time as the PR is updated:
 The built-in web server at http://localhost:3456 provides:
 
 - List of all repositories with reviews
-- PR listing with title and author
+- PR listing with title, author, and last synced time
+- Search functionality to filter repos and PRs
 - Rendered markdown with syntax highlighting
 - Copy buttons on code blocks
+- Sync button for manual sync mode (or to trigger sync in auto mode)
 
 ## State
 
