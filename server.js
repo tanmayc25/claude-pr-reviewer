@@ -353,6 +353,8 @@ async function cloneOrUpdateRepo(repoFullName) {
 
 async function checkoutPRBranch(repoDir, repoFullName, prNumber) {
   log(`Checking out PR #${prNumber}`);
+  // Reset any local changes (like .gitignore modifications) before checkout
+  execSync("git checkout -- .", { cwd: repoDir, stdio: "pipe" });
   execSync(`gh pr checkout ${prNumber} --repo ${repoFullName}`, {
     cwd: repoDir,
     stdio: "pipe",
