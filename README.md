@@ -11,7 +11,6 @@ A local daemon that monitors GitHub PRs and automatically generates code reviews
 - Generates reviews using Claude Code CLI
 - Appends reviews to a single file per PR (maintains context across updates)
 - **Web interface** for browsing and reading reviews with rendered markdown
-- Desktop notifications (macOS) when new PRs are detected
 - Automatic cleanup of closed PRs and old repos
 
 ## Prerequisites
@@ -59,6 +58,12 @@ REPOS=/mycompany\/.*/
 
 # Web server port for browsing reviews
 WEB_PORT=3456
+
+# Sync mode: "auto" (poll automatically) or "manual" (trigger from UI)
+SYNC_MODE=auto
+
+# Number of PRs to review in parallel (default: 3)
+PARALLEL_REVIEWS=3
 
 # Cleanup
 CLEANUP_INTERVAL_HOURS=24

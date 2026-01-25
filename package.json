@@ -2,10 +2,10 @@
   "name": "pr-review-daemon",
   "version": "1.0.0",
   "description": "Local daemon that monitors GitHub PRs and triggers Claude reviews",
-  "main": "server.ts",
+  "main": "src/index.ts",
   "type": "module",
   "scripts": {
-    "start": "bun run server.ts"
+    "start": "bun run src/index.ts"
   },
   "dependencies": {
     "marked": "17.0.1",
