@@ -9,9 +9,11 @@ A local daemon that monitors GitHub PRs and automatically generates code reviews
 - Filters PRs by author (review only your PRs, or exclude your PRs)
 - Clones repos locally and checks out PR branches
 - Generates reviews using Claude Code CLI
-- Appends reviews to a single file per PR (maintains context across updates)
+- **Versioned reviews**: Each review is stored as a separate version file
+- **Context-aware**: Passes previous reviews to Claude so it can track addressed issues
+- **Tabbed UI**: Browse review versions in a tabbed interface (latest to oldest)
 - **Web interface** for browsing and reading reviews with rendered markdown
-- Automatic cleanup of closed PRs and old repos
+- Automatic cleanup of closed PRs, old repos, and excess review versions
 
 ## Prerequisites
 
@@ -68,6 +70,10 @@ PARALLEL_REVIEWS=3
 # Cleanup
 CLEANUP_INTERVAL_HOURS=24
 CLEANUP_AGE_DAYS=7
+
+# Review versioning
+MAX_REVIEW_VERSIONS=10   # Max versions to keep per PR
+CONTEXT_VERSIONS=2       # Previous versions passed to Claude for context
 ```
 
 ## Usage
