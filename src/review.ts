@@ -29,9 +29,13 @@ export function getVersionFilename(timestamp: string): string {
  * Parse timestamp from version filename
  */
 export function parseVersionTimestamp(filename: string): string | null {
-  const match = filename.match(/^v-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z\.md$/);
+  // Match with optional milliseconds: v-20260125T143022Z.md or v-20260125T143022123Z.md
+  const match = filename.match(/^v-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(\d{3})?Z\.md$/);
   if (!match) return null;
-  const [, year, month, day, hour, min, sec] = match;
+  const [, year, month, day, hour, min, sec, ms] = match;
+  if (ms) {
+    return `${year}-${month}-${day}T${hour}:${min}:${sec}.${ms}Z`;
+  }
   return `${year}-${month}-${day}T${hour}:${min}:${sec}Z`;
 }
 
