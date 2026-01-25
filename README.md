@@ -13,6 +13,7 @@ A local daemon that monitors GitHub PRs and automatically generates code reviews
 - **Context-aware**: Passes previous reviews to Claude so it can track addressed issues
 - **Tabbed UI**: Browse review versions in a tabbed interface (latest to oldest)
 - **Web interface** for browsing and reading reviews with rendered markdown
+- **Settings UI**: Configure all settings from the browser without restarting
 - Automatic cleanup of closed PRs, old repos, and excess review versions
 
 ## Prerequisites
@@ -36,6 +37,17 @@ cp .env.example .env
 ```
 
 ## Configuration
+
+Settings can be configured in two ways:
+
+1. **`.env` file** - Set initial defaults (read at startup)
+2. **Settings UI** - Edit settings at http://localhost:3456/settings (changes take effect immediately, persist to `.pr-settings.json`)
+
+The Settings UI overrides `.env` values. Use "Reset to Defaults" to revert to `.env` values.
+
+**Note:** `WEB_PORT` and `WORK_DIR` require a restart to take effect. All other settings apply immediately.
+
+### Environment Variables
 
 Edit `.env`:
 
@@ -138,15 +150,14 @@ The built-in web server at http://localhost:3456 provides:
 - Re-review button with custom prompt support
 - Delete button to remove reviews
 - Sync button for manual sync mode (or to trigger sync in auto mode)
-
-### Migration
-
-Old single-file reviews (`pr-review-{number}.md`) are automatically migrated to the new versioned directory format when accessed.
+- **Settings page** (`/settings`) to configure all options without editing files
 
 ## State
 
 - `.pr-state.json` - Tracks processed commit SHAs to avoid re-reviewing
-- Delete this file to re-review all PRs
+- `.pr-settings.json` - Persisted settings from the Settings UI (overrides `.env`)
+
+Delete `.pr-state.json` to re-review all PRs. Delete `.pr-settings.json` to reset settings to `.env` defaults.
 
 ## License
 
