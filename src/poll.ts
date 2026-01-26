@@ -200,24 +200,44 @@ export async function poll(): Promise<void> {
       logger.info({ count: prsToProcess.length, concurrency }, "Processing PRs in parallel");
     }
 
-    // Process in chunks based on concurrency limit
-    for (let i = 0; i < prsToProcess.length; i += concurrency) {
-      const chunk = prsToProcess.slice(i, i + concurrency);
+    // Group PRs by repository to avoid race conditions
+    // PRs from the same repo must be processed serially (they share the same checkout directory)
+    const prsByRepo = new Map<string, typeof prsToProcess>();
+    for (const pr of prsToProcess) {
+      const repo = pr.repo!;
+      if (!prsByRepo.has(repo)) {
+        prsByRepo.set(repo, []);
+      }
+      prsByRepo.get(repo)!.push(pr);
+    }
+
+    // Process repos in parallel (up to concurrency limit), but PRs within each repo serially
+    const repoQueues = Array.from(prsByRepo.entries());
+    for (let i = 0; i < repoQueues.length; i += concurrency) {
+      const chunk = repoQueues.slice(i, i + concurrency);
       const results = await Promise.all(
-        chunk.map(async (pr) => {
-          try {
-            return await processPR(pr);
-          } catch (error) {
-            logger.error({ pr: `${pr.repo}#${pr.number}`, error: (error as Error).message }, "Error processing PR");
-            return null;
+        chunk.map(async ([repo, repoPRs]) => {
+          const repoResults: (string | null)[] = [];
+          // Process PRs from this repo serially to avoid checkout race condition
+          for (const pr of repoPRs) {
+            try {
+              const result = await processPR(pr);
+              repoResults.push(result);
+            } catch (error) {
+              logger.error({ pr: `${pr.repo}#${pr.number}`, error: (error as Error).message }, "Error processing PR");
+              repoResults.push(null);
+            }
           }
+          return repoResults;
         })
       );
 
-      for (const reviewPath of results) {
-        if (reviewPath) {
-          logger.info({ path: reviewPath }, "Review completed");
-          processed++;
+      for (const repoResults of results) {
+        for (const reviewPath of repoResults) {
+          if (reviewPath) {
+            logger.info({ path: reviewPath }, "Review completed");
+            processed++;
+          }
         }
       }
     }

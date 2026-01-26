@@ -1,6 +1,7 @@
 node_modules/
 .env
 .pr-state.json
+.pr-settings.json
 logs/
 
 # Cloned repos (org_repo format)
