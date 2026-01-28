@@ -2,7 +2,7 @@ import { CONFIG } from "./config";
 import { logger } from "./logger";
 import { prState, saveState, isPolling, setPolling } from "./state";
 import { getOpenPRs } from "./github";
-import { cloneOrUpdateRepo, checkoutPRBranch } from "./repo";
+import { cloneOrUpdateRepo, createWorktreeForPR, cleanupWorktree } from "./repo";
 import { runReview } from "./review";
 import { getAuthorLogin, shouldProcessPR } from "./utils";
 import type { PRDetails } from "./types";
@@ -48,11 +48,16 @@ async function processPR(pr: PRDetails, customPrompt?: string, force?: boolean):
     `${actionType} detected`
   );
 
+  let worktreeDir: string | null = null;
   try {
-    const repoDir = await cloneOrUpdateRepo(pr.repo!);
-    await checkoutPRBranch(repoDir, pr.repo!, pr.number);
+    // Ensure base repo is up to date
+    await cloneOrUpdateRepo(pr.repo!);
+
+    // Create isolated worktree for this PR (enables true parallel reviews)
+    worktreeDir = await createWorktreeForPR(pr.repo!, pr.number);
+
     const reviewPath = await runReview(
-      repoDir,
+      worktreeDir,
       pr.repo!,
       pr.number,
       pr.title,
@@ -71,6 +76,11 @@ async function processPR(pr: PRDetails, customPrompt?: string, force?: boolean):
   } catch (error) {
     logger.error({ pr: prKey, error: (error as Error).message.slice(0, 200) }, "Error processing PR");
     return null;
+  } finally {
+    // Always clean up the worktree after review
+    if (worktreeDir) {
+      await cleanupWorktree(pr.repo!, pr.number);
+    }
   }
 }
 
@@ -200,44 +210,25 @@ export async function poll(): Promise<void> {
       logger.info({ count: prsToProcess.length, concurrency }, "Processing PRs in parallel");
     }
 
-    // Group PRs by repository to avoid race conditions
-    // PRs from the same repo must be processed serially (they share the same checkout directory)
-    const prsByRepo = new Map<string, typeof prsToProcess>();
-    for (const pr of prsToProcess) {
-      const repo = pr.repo!;
-      if (!prsByRepo.has(repo)) {
-        prsByRepo.set(repo, []);
-      }
-      prsByRepo.get(repo)!.push(pr);
-    }
-
-    // Process repos in parallel (up to concurrency limit), but PRs within each repo serially
-    const repoQueues = Array.from(prsByRepo.entries());
-    for (let i = 0; i < repoQueues.length; i += concurrency) {
-      const chunk = repoQueues.slice(i, i + concurrency);
+    // Process PRs in parallel with concurrency limit
+    // Each PR gets its own worktree, so parallel processing is safe
+    for (let i = 0; i < prsToProcess.length; i += concurrency) {
+      const chunk = prsToProcess.slice(i, i + concurrency);
       const results = await Promise.all(
-        chunk.map(async ([repo, repoPRs]) => {
-          const repoResults: (string | null)[] = [];
-          // Process PRs from this repo serially to avoid checkout race condition
-          for (const pr of repoPRs) {
-            try {
-              const result = await processPR(pr);
-              repoResults.push(result);
-            } catch (error) {
-              logger.error({ pr: `${pr.repo}#${pr.number}`, error: (error as Error).message }, "Error processing PR");
-              repoResults.push(null);
-            }
+        chunk.map(async (pr) => {
+          try {
+            return await processPR(pr);
+          } catch (error) {
+            logger.error({ pr: `${pr.repo}#${pr.number}`, error: (error as Error).message }, "Error processing PR");
+            return null;
           }
-          return repoResults;
         })
       );
 
-      for (const repoResults of results) {
-        for (const reviewPath of repoResults) {
-          if (reviewPath) {
-            logger.info({ path: reviewPath }, "Review completed");
-            processed++;
-          }
+      for (const reviewPath of results) {
+        if (reviewPath) {
+          logger.info({ path: reviewPath }, "Review completed");
+          processed++;
         }
       }
     }

@@ -5,34 +5,29 @@ import { logger } from "./logger";
 import { prState, saveState } from "./state";
 import { isPROpen } from "./github";
 import { pruneVersions } from "./review";
+import { cleanupWorktree, cleanupOrphanedWorktrees } from "./repo";
 
-export function cleanupClosedPRs(): void {
+export async function cleanupClosedPRs(): Promise<void> {
   logger.info("Checking for closed PRs to clean up...");
-  const keysToRemove: { prKey: string; repo: string }[] = [];
+  const keysToRemove: { prKey: string; repo: string; prNumber: number }[] = [];
 
   for (const [prKey] of prState.entries()) {
     const match = prKey.match(/^(.+)#(\d+)$/);
     if (!match) continue;
 
-    const [, repo, prNumber] = match;
-    if (!isPROpen(repo, parseInt(prNumber, 10))) {
-      keysToRemove.push({ prKey, repo });
+    const [, repo, prNumberStr] = match;
+    const prNumber = parseInt(prNumberStr, 10);
+    if (!isPROpen(repo, prNumber)) {
+      keysToRemove.push({ prKey, repo, prNumber });
     }
   }
 
-  for (const { prKey, repo } of keysToRemove) {
+  for (const { prKey, repo, prNumber } of keysToRemove) {
     logger.info({ pr: prKey }, "PR closed/merged - removing from state");
     prState.delete(prKey);
 
-    const repoDir = path.join(CONFIG.workDir, repo.replace("/", "_"));
-    if (fs.existsSync(repoDir)) {
-      try {
-        fs.rmSync(repoDir, { recursive: true, force: true });
-        logger.info({ dir: repoDir }, "Deleted local clone");
-      } catch (e) {
-        logger.error({ dir: repoDir, error: (e as Error).message }, "Could not delete repo");
-      }
-    }
+    // Clean up any lingering worktree for this PR
+    await cleanupWorktree(repo, prNumber);
   }
 
   if (keysToRemove.length > 0) {
@@ -46,17 +41,18 @@ export function cleanupClosedPRs(): void {
 export function cleanupOldRepos(): void {
   logger.info({ maxAgeDays: CONFIG.cleanupAgeDays }, "Cleaning up old repos...");
 
-  if (!fs.existsSync(CONFIG.workDir)) return;
+  const reposDir = path.join(CONFIG.workDir, "repos");
+  if (!fs.existsSync(reposDir)) return;
 
   const now = Date.now();
   const maxAge = CONFIG.cleanupAgeDays * 24 * 60 * 60 * 1000;
   let cleaned = 0;
 
-  const entries = fs.readdirSync(CONFIG.workDir, { withFileTypes: true });
+  const entries = fs.readdirSync(reposDir, { withFileTypes: true });
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
 
-    const dirPath = path.join(CONFIG.workDir, entry.name);
+    const dirPath = path.join(reposDir, entry.name);
 
     // Only consider directories that look like repo clones (have .git folder)
     if (!fs.existsSync(path.join(dirPath, ".git"))) {
@@ -132,10 +128,22 @@ export function cleanupReviewVersions(): void {
   }
 }
 
+export async function cleanupWorktrees(): Promise<void> {
+  logger.info("Cleaning up orphaned worktrees...");
+
+  // Get all active PR keys
+  const activePRKeys = new Set(prState.keys());
+
+  await cleanupOrphanedWorktrees(activePRKeys);
+
+  logger.info("Worktree cleanup complete");
+}
+
 export async function runCleanup(): Promise<void> {
   logger.info("--- Running cleanup ---");
-  cleanupClosedPRs();
+  await cleanupClosedPRs();
   cleanupOldRepos();
   cleanupReviewVersions();
+  await cleanupWorktrees();
   logger.info("--- Cleanup complete ---");
 }
