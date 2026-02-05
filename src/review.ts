@@ -317,9 +317,31 @@ ${customPrompt}
    - Security concerns
    - Performance implications
    - Test coverage (if applicable)
-3. Provide specific, actionable feedback with file paths and line references
-4. If there were previous reviews, note which issues have been addressed and which remain
-5. Summarize your overall assessment (approve, request changes, or needs discussion)
+3. If there were previous reviews, note which issues have been addressed and which remain
+4. Summarize your overall assessment (approve, request changes, or needs discussion)
+
+## Output Format
+For each issue found, use this format:
+
+### [Severity] Brief Title
+
+Detailed explanation of the issue...
+
+<details>
+<summary>Context for Agents</summary>
+
+One-sentence actionable description of what to fix.
+
+File: exact/path/to/file.ts
+Line: 42
+
+</details>
+
+Severity levels:
+- [Critical] - Security issues, data loss, crashes
+- [Important] - Bugs, logic errors, missing validation
+- [Suggestion] - Improvements, better patterns
+- [Nitpick] - Style, minor cleanups
 
 Start by reading the changed files, then provide your review.`;
 
